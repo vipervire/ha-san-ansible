@@ -38,6 +38,13 @@ zfs_modprobe_options:
   zfs_resilver_min_time_ms: 5000
   zfs_resilver_delay: 0
 
+# ZFS scrub automation
+zfs_scrub_enabled: true
+zfs_scrub_schedule: "*-*-01 02:00:00"  # 1st of month at 2:00 AM
+zfs_scrub_randomized_delay_sec: 1800   # 30 minutes random delay
+zfs_scrub_skip_on_degraded: true       # Skip if pool is degraded
+zfs_scrub_min_interval_days: 25        # Minimum days between scrubs
+
 # Datasets to create after pool exists
 zfs_datasets:
   - name: "{{ zfs_pool_name }}/nfs"

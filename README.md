@@ -153,6 +153,17 @@ stonith_admin -t fence_ipmilan -r -F storage-b  # dry run
 
 # Verify resilver after recovery
 zpool status san-pool
+
+# Verify ZFS scrub automation
+systemctl status zfs-scrub@san-pool.timer
+systemctl list-timers zfs-scrub@san-pool.timer
+
+# Manually trigger a scrub (safe to test)
+systemctl start zfs-scrub@san-pool.service
+journalctl -u zfs-scrub@san-pool.service -f
+
+# Check scrub progress
+zpool status san-pool
 ```
 
 ## Customization Points
@@ -161,6 +172,9 @@ zpool status san-pool
 - **VLANs/subnets**: Edit `vlans` dict in `group_vars/all.yml`
 - **STONITH method**: Switch between `ipmi` and `smart_plug` in `storage_nodes.yml`
 - **Snapshot policy**: Edit `sanoid_templates` in `storage_nodes.yml`
+- **ZFS scrub schedule**: Edit `zfs_scrub_schedule` in `storage_nodes.yml` (default: monthly on 1st at 2 AM)
+  - Use systemd OnCalendar syntax: `"*-*-01 02:00:00"` = 1st of month at 2am
+  - Disable with `zfs_scrub_enabled: false`
 - **SMB shares**: Add entries to `smb_shares` list
 - **NFS exports**: Add entries to `nfs_exports` list
 - **iSCSI zvols**: Create manually with `zfs create -V <size> san-pool/iscsi/<name>`

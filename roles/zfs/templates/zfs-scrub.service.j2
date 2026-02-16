@@ -1,0 +1,20 @@
+# Managed by Ansible — ZFS pool scrub service
+[Unit]
+Description=ZFS scrub for {{ zfs_pool_name }}
+Documentation=man:zpool-scrub(8)
+After=zfs-import.target
+ConditionPathIsDirectory=/proc/spl
+Wants=zfs-import.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/zfs-scrub-wrapper {{ zfs_pool_name }}
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zfs-scrub
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

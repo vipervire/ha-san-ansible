@@ -7,3 +7,7 @@
     echo {{ value }} > /sys/module/zfs/parameters/{{ key }} 2>/dev/null || true
     {% endfor %}
   changed_when: true
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true

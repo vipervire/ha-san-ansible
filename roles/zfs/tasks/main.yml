@@ -75,3 +75,35 @@
         name: sanoid.timer
         enabled: true
         state: started
+
+# ─── ZFS Scrub Automation ──────────────────────────────────────────────────
+- name: Deploy ZFS scrub wrapper script
+  ansible.builtin.template:
+    src: zfs-scrub-wrapper.sh.j2
+    dest: /usr/local/bin/zfs-scrub-wrapper
+    mode: "0755"
+  when: zfs_scrub_enabled | default(true)
+
+- name: Deploy ZFS scrub systemd service
+  ansible.builtin.template:
+    src: zfs-scrub.service.j2
+    dest: /etc/systemd/system/zfs-scrub@{{ zfs_pool_name }}.service
+    mode: "0644"
+  when: zfs_scrub_enabled | default(true)
+  notify: reload systemd
+
+- name: Deploy ZFS scrub systemd timer
+  ansible.builtin.template:
+    src: zfs-scrub.timer.j2
+    dest: /etc/systemd/system/zfs-scrub@{{ zfs_pool_name }}.timer
+    mode: "0644"
+  when: zfs_scrub_enabled | default(true)
+  notify: reload systemd
+
+- name: Enable and start ZFS scrub timer
+  ansible.builtin.systemd:
+    name: zfs-scrub@{{ zfs_pool_name }}.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: zfs_scrub_enabled | default(true)
