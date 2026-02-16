@@ -1,0 +1,21 @@
+# Managed by Ansible — sanoid snapshot policy
+
+{% for ds in sanoid_datasets %}
+[{{ ds.name }}]
+  use_template = {{ ds.template }}
+{% if ds.recursive | default(false) %}
+  recursive = yes
+{% endif %}
+
+{% endfor %}
+
+{% for name, tmpl in sanoid_templates.items() %}
+[template_{{ name }}]
+  hourly = {{ tmpl.hourly }}
+  daily = {{ tmpl.daily }}
+  monthly = {{ tmpl.monthly }}
+  yearly = {{ tmpl.yearly }}
+  autosnap = {{ 'yes' if tmpl.autosnap else 'no' }}
+  autoprune = {{ 'yes' if tmpl.autoprune else 'no' }}
+
+{% endfor %}

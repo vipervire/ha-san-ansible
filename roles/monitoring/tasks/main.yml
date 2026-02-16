@@ -1,0 +1,21 @@
+---
+# roles/monitoring/tasks/main.yml — Prometheus node_exporter
+
+- name: Install prometheus-node-exporter
+  ansible.builtin.apt:
+    name: prometheus-node-exporter
+    state: present
+
+- name: Configure node_exporter to listen on management VLAN only
+  ansible.builtin.copy:
+    dest: /etc/default/prometheus-node-exporter
+    mode: "0644"
+    content: |
+      ARGS="--web.listen-address={{ mgmt_ip | default('0.0.0.0') }}:9100"
+  notify: restart node_exporter
+
+- name: Enable node_exporter service
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    enabled: true
+    state: started

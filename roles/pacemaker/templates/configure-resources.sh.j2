@@ -1,0 +1,75 @@
+#!/bin/bash
+# Managed by Ansible — Pacemaker resource configuration
+# Run AFTER:
+#   1. Cluster is formed (pcs cluster status shows all nodes online)
+#   2. STONITH is configured (bash /root/configure-stonith.sh)
+#   3. ZFS pool exists (bash /root/create-pool.sh)
+#   4. Pool is exported (zpool export {{ zfs_pool_name }})
+#
+# Usage: bash /root/configure-pacemaker-resources.sh
+set -euo pipefail
+
+echo "=== Configuring Pacemaker HA resources ==="
+
+# ─── Prevent resources from running on quorum node ─────────────────────────
+pcs constraint location san-resources rule score=-INFINITY \#uname eq quorum 2>/dev/null || true
+
+# ─── ZFS pool import resource ──────────────────────────────────────────────
+echo "Creating ZFS pool resource"
+pcs resource create zfs-pool ocf:heartbeat:ZFS \
+  pool="{{ zfs_pool_name }}" \
+  op start timeout=90s \
+  op stop timeout=60s \
+  op monitor interval=30s timeout=30s \
+  2>/dev/null || echo "  (zfs-pool may already exist)"
+
+# ─── Virtual IPs ───────────────────────────────────────────────────────────
+echo "Creating VIP resources"
+pcs resource create vip-nfs ocf:heartbeat:IPaddr2 \
+  ip="{{ vip_nfs }}" cidr_netmask={{ vip_cidr }} \
+  op monitor interval=10s \
+  2>/dev/null || echo "  (vip-nfs may already exist)"
+
+pcs resource create vip-smb ocf:heartbeat:IPaddr2 \
+  ip="{{ vip_smb }}" cidr_netmask={{ vip_cidr }} \
+  op monitor interval=10s \
+  2>/dev/null || echo "  (vip-smb may already exist)"
+
+pcs resource create vip-iscsi ocf:heartbeat:IPaddr2 \
+  ip="{{ vip_iscsi }}" cidr_netmask={{ vip_cidr }} \
+  op monitor interval=10s \
+  2>/dev/null || echo "  (vip-iscsi may already exist)"
+
+# ─── Service resources ─────────────────────────────────────────────────────
+echo "Creating service resources"
+pcs resource create nfs-server systemd:nfs-kernel-server \
+  op start timeout=30s op stop timeout=30s \
+  op monitor interval=30s \
+  2>/dev/null || echo "  (nfs-server may already exist)"
+
+pcs resource create smb-server systemd:smbd \
+  op start timeout=30s op stop timeout=30s \
+  op monitor interval=30s \
+  2>/dev/null || echo "  (smb-server may already exist)"
+
+# ─── Resource group (strict ordering) ─────────────────────────────────────
+echo "Creating resource group"
+pcs resource group add san-resources \
+  zfs-pool vip-nfs vip-smb vip-iscsi nfs-server smb-server \
+  2>/dev/null || echo "  (san-resources group may already exist)"
+
+# ─── Prefer primary node (soft constraint) ─────────────────────────────────
+pcs constraint location san-resources prefers {{ pacemaker_preferred_node }}=100 \
+  2>/dev/null || echo "  (location constraint may already exist)"
+
+echo ""
+echo "=== Pacemaker resource configuration complete ==="
+echo ""
+pcs status
+echo ""
+echo "Operational commands:"
+echo "  Status:           pcs status"
+echo "  Planned failover: pcs resource move san-resources storage-b"
+echo "  Clear constraint: pcs resource clear san-resources"
+echo "  Maintenance mode: pcs node standby storage-a"
+echo "  End maintenance:  pcs node unstandby storage-a"

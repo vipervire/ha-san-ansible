@@ -1,0 +1,50 @@
+---
+# =============================================================================
+# storage-b — Node-Specific Variables
+# =============================================================================
+
+storage_ip: "10.10.10.2"
+mgmt_ip: "10.20.20.2"
+client_ip: "10.30.30.2"
+
+ssh_listen_addresses:
+  - "{{ mgmt_ip }}"
+
+iscsi_target_iqn: "{{ iscsi_iqn_prefix }}:storage-b"
+iscsi_initiator_name: "{{ iscsi_iqn_prefix }}:initiator-b"
+
+iscsi_peer_ip: "10.10.10.1"
+iscsi_peer_iqn: "{{ iscsi_iqn_prefix }}:storage-a"
+
+local_data_disks:
+  - device: /dev/sda
+    label: "data-b-0"
+  - device: /dev/sdb
+    label: "data-b-1"
+  - device: /dev/sdc
+    label: "data-b-2"
+  - device: /dev/sdd
+    label: "data-b-3"
+  - device: /dev/sde
+    label: "data-b-4"
+  - device: /dev/sdf
+    label: "data-b-5"
+  - device: /dev/sdg
+    label: "data-b-6"
+  - device: /dev/sdh
+    label: "data-b-7"
+  - device: /dev/sdi
+    label: "data-b-8"
+  - device: /dev/sdj
+    label: "data-b-9"
+  - device: /dev/sdk
+    label: "data-b-10"
+  - device: /dev/sdl
+    label: "data-b-11"
+
+# slog_disk:
+#   device: /dev/sdm
+#   label: "slog-b"
+# special_disk:
+#   device: /dev/sdn
+#   label: "special-b"

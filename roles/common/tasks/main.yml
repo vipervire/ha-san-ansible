@@ -1,0 +1,79 @@
+---
+# roles/common/tasks/main.yml — Base OS setup for all nodes
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - sudo
+      - vim
+      - tmux
+      - htop
+      - iotop
+      - net-tools
+      - dnsutils
+      - rsync
+      - chrony
+      - python3
+      - python3-apt
+      - unattended-upgrades
+      - apt-listchanges
+    state: present
+
+- name: Remove unnecessary packages
+  ansible.builtin.apt:
+    name:
+      - avahi-daemon
+      - cups-daemon
+      - exim4-base
+      - exim4-daemon-light
+      - bluetooth
+      - modemmanager
+    state: absent
+    purge: true
+  ignore_errors: true  # some may not be installed
+
+- name: Autoremove orphaned packages
+  ansible.builtin.apt:
+    autoremove: true
+
+- name: Configure chrony NTP
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    mode: "0644"
+  notify: restart chrony
+
+- name: Ensure chrony is enabled
+  ansible.builtin.systemd:
+    name: chronyd
+    enabled: true
+    state: started
+
+- name: Build /etc/hosts with cluster nodes
+  ansible.builtin.template:
+    src: hosts.j2
+    dest: /etc/hosts
+    mode: "0644"
+
+- name: Mask ctrl-alt-del reboot target
+  ansible.builtin.systemd:
+    name: ctrl-alt-del.target
+    masked: true
+
+- name: Configure unattended-upgrades (security only, no auto-reboot)
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/51unattended-upgrades-custom
+    mode: "0644"
+    content: |
+      Unattended-Upgrade::Automatic-Reboot "false";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";

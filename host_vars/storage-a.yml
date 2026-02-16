@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# storage-a — Node-Specific Variables
+# =============================================================================
+
+# Network addresses per VLAN
+storage_ip: "10.10.10.1"
+mgmt_ip: "10.20.20.1"
+client_ip: "10.30.30.1"
+
+# SSH listens only on management VLAN
+ssh_listen_addresses:
+  - "{{ mgmt_ip }}"
+
+# iSCSI identity
+iscsi_target_iqn: "{{ iscsi_iqn_prefix }}:storage-a"
+iscsi_initiator_name: "{{ iscsi_iqn_prefix }}:initiator-a"
+
+# Peer node (for iSCSI initiator to connect to)
+iscsi_peer_ip: "10.10.10.2"
+iscsi_peer_iqn: "{{ iscsi_iqn_prefix }}:storage-b"
+
+# ---------------------------------------------------------------------------
+# Local disks — adjust device paths to match your hardware
+# ---------------------------------------------------------------------------
+# These are the raw block devices to export via LIO and use in the ZFS pool.
+# Use `lsblk` or `ls /dev/disk/by-id/` to identify them.
+
+local_data_disks:
+  - device: /dev/sda
+    label: "data-a-0"
+  - device: /dev/sdb
+    label: "data-a-1"
+  - device: /dev/sdc
+    label: "data-a-2"
+  - device: /dev/sdd
+    label: "data-a-3"
+  - device: /dev/sde
+    label: "data-a-4"
+  - device: /dev/sdf
+    label: "data-a-5"
+  - device: /dev/sdg
+    label: "data-a-6"
+  - device: /dev/sdh
+    label: "data-a-7"
+  - device: /dev/sdi
+    label: "data-a-8"
+  - device: /dev/sdj
+    label: "data-a-9"
+  - device: /dev/sdk
+    label: "data-a-10"
+  - device: /dev/sdl
+    label: "data-a-11"
+
+# Optional: SLOG and special vdev disks (Samsung SV843 or similar)
+# Uncomment if you have dedicated devices for these.
+# slog_disk:
+#   device: /dev/sdm
+#   label: "slog-a"
+# special_disk:
+#   device: /dev/sdn
+#   label: "special-a"

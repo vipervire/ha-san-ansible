@@ -1,0 +1,81 @@
+---
+# =============================================================================
+# HA ZFS-over-iSCSI SAN — Main Deployment Playbook
+# =============================================================================
+#
+# Usage:
+#   # Full deployment (all roles, all nodes):
+#   ansible-playbook -i inventory.yml site.yml
+#
+#   # Only hardening + common base:
+#   ansible-playbook -i inventory.yml site.yml --tags base
+#
+#   # Only ZFS + iSCSI setup on storage nodes:
+#   ansible-playbook -i inventory.yml site.yml --tags storage
+#
+#   # Only Pacemaker cluster setup:
+#   ansible-playbook -i inventory.yml site.yml --tags cluster
+#
+#   # Only services (NFS, SMB, iSCSI client target):
+#   ansible-playbook -i inventory.yml site.yml --tags services
+#
+#   # Dry run:
+#   ansible-playbook -i inventory.yml site.yml --check --diff
+#
+# Prerequisites:
+#   - Fresh Debian 12 minimal install on all three nodes
+#   - SSH key access as storageadmin with sudo
+#   - Network connectivity on management VLAN between all nodes
+#   - Disks identified and listed in host_vars
+#
+# IMPORTANT:
+#   This playbook configures everything UP TO pool creation. The actual
+#   `zpool create` command with cross-node mirror pairs requires manual
+#   verification of iSCSI device paths (they vary per environment).
+#   A helper script is generated at /root/create-pool.sh on the active node.
+#
+
+# ─── Play 1: Base setup on ALL nodes ────────────────────────────────────────
+- name: "Base OS setup and hardening (all nodes)"
+  hosts: cluster
+  tags: [base]
+  roles:
+    - common
+    - hardening
+
+# ─── Play 2: ZFS + iSCSI on STORAGE nodes ──────────────────────────────────
+- name: "ZFS and iSCSI backend (storage nodes only)"
+  hosts: storage_nodes
+  tags: [storage]
+  roles:
+    - zfs
+    - iscsi-target
+    - iscsi-initiator
+
+# ─── Play 3: Pacemaker/Corosync on ALL cluster nodes ───────────────────────
+- name: "Pacemaker / Corosync cluster (all nodes)"
+  hosts: cluster
+  tags: [cluster]
+  roles:
+    - pacemaker
+
+# ─── Play 4: HA services on STORAGE nodes ──────────────────────────────────
+- name: "NFS, SMB, iSCSI client services (storage nodes only)"
+  hosts: storage_nodes
+  tags: [services]
+  roles:
+    - services
+
+# ─── Play 5: Cockpit + Houston UI on STORAGE nodes ─────────────────────────
+- name: "Cockpit + 45Drives Houston plugins (storage nodes)"
+  hosts: storage_nodes
+  tags: [cockpit]
+  roles:
+    - cockpit
+
+# ─── Play 6: Monitoring on ALL nodes ───────────────────────────────────────
+- name: "Monitoring (node_exporter on all nodes)"
+  hosts: cluster
+  tags: [monitoring]
+  roles:
+    - monitoring

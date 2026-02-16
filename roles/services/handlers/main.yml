@@ -1,0 +1,10 @@
+---
+- name: reload nfs exports
+  ansible.builtin.command:
+    cmd: exportfs -ra
+  failed_when: false  # NFS may not be running yet
+
+- name: validate smb config
+  ansible.builtin.command:
+    cmd: testparm -s
+  changed_when: false

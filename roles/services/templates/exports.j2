@@ -1,0 +1,5 @@
+# Managed by Ansible — NFS exports
+# Only relevant on the active node (Pacemaker manages nfs-kernel-server)
+{% for export in nfs_exports %}
+{{ export.path }}    {{ export.clients }}({{ export.options }})
+{% endfor %}

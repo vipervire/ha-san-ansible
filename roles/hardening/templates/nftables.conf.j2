@@ -1,0 +1,61 @@
+#!/usr/sbin/nft -f
+# Managed by Ansible — HA SAN firewall rules
+# Node: {{ inventory_hostname }}
+
+flush ruleset
+
+table inet filter {
+  chain input {
+    type filter hook input priority 0; policy drop;
+
+    # Loopback always allowed
+    iif lo accept
+
+    # Established/related connections
+    ct state established,related accept
+
+    # ICMP (ping) — useful for diagnostics
+    ip protocol icmp accept
+
+{% if inventory_hostname in groups['storage_nodes'] %}
+    # ─── Storage VLAN ({{ vlans.storage.id }}) — iSCSI from peer only ───
+    ip saddr {{ vlans.storage.subnet }} tcp dport 3260 accept
+
+    # ─── Client VLAN ({{ vlans.client.id }}) — NFS, SMB, iSCSI ─────────
+    ip saddr {{ vlans.client.subnet }} tcp dport { 2049, 445, 3260, 111 } accept
+    ip saddr {{ vlans.client.subnet }} udp dport 111 accept
+{% endif %}
+
+    # ─── Management VLAN ({{ vlans.management.id }}) ────────────────────
+    # SSH
+    ip saddr {{ vlans.management.subnet }} tcp dport {{ ssh_port }} accept
+
+    # Corosync (knet)
+    ip saddr {{ vlans.management.subnet }} udp dport 5405 accept
+
+    # pcsd (Pacemaker web)
+    ip saddr {{ vlans.management.subnet }} tcp dport 2224 accept
+
+    # Cockpit web UI
+    ip saddr {{ vlans.management.subnet }} tcp dport 9090 accept
+
+    # Prometheus node_exporter
+    ip saddr {{ vlans.management.subnet }} tcp dport 9100 accept
+
+{% if inventory_hostname in groups['storage_nodes'] %}
+    # Corosync on storage VLAN (ring1 redundancy)
+    ip saddr {{ vlans.storage.subnet }} udp dport 5405 accept
+{% endif %}
+
+    # Log + drop everything else
+    log prefix "nft-drop: " counter drop
+  }
+
+  chain forward {
+    type filter hook forward priority 0; policy drop;
+  }
+
+  chain output {
+    type filter hook output priority 0; policy accept;
+  }
+}

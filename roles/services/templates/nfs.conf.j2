@@ -1,0 +1,14 @@
+# Managed by Ansible — NFS server configuration
+
+[general]
+pipefs-directory = /run/rpc_pipefs
+
+[nfsd]
+host = {{ nfs_bind_ip }}
+threads = {{ nfs_threads }}
+vers3 = {{ 'y' if nfs_v3_enabled else 'n' }}
+vers4 = {{ 'y' if nfs_v4_enabled else 'n' }}
+vers4.1 = {{ 'y' if nfs_v41_enabled else 'n' }}
+
+[mountd]
+port = 20048

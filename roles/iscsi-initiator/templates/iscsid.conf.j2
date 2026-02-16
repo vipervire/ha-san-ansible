@@ -1,0 +1,33 @@
+# Managed by Ansible — open-iscsi initiator configuration
+# Aggressive-safe timeout profile for HA ZFS-over-iSCSI
+
+# ─── General ────────────────────────────────────────────────────────────────
+node.startup = automatic
+node.leading_login = No
+
+# ─── Timeouts — Aggressive-Safe Profile ─────────────────────────────────────
+# These control how fast a dead peer's LUNs are faulted.
+# iSCSI detection: noop_out_interval + noop_out_timeout = ~4s
+# LUN fault after: replacement_timeout = 5s
+node.session.timeo.replacement_timeout = {{ iscsi_replacement_timeout }}
+node.conn[0].timeo.login_timeout = {{ iscsi_login_timeout }}
+node.conn[0].timeo.noop_out_interval = {{ iscsi_noop_out_interval }}
+node.conn[0].timeo.noop_out_timeout = {{ iscsi_noop_out_timeout }}
+
+# ─── Authentication ─────────────────────────────────────────────────────────
+{% if iscsi_chap_enabled %}
+node.session.auth.authmethod = CHAP
+node.session.auth.username = {{ iscsi_chap_user }}
+node.session.auth.password = {{ iscsi_chap_password }}
+{% else %}
+node.session.auth.authmethod = None
+{% endif %}
+
+# ─── Error recovery ─────────────────────────────────────────────────────────
+node.session.err_timeo.abort_timeout = 15
+node.session.err_timeo.lu_reset_timeout = 30
+node.session.err_timeo.tgt_reset_timeout = 30
+
+# ─── Performance ────────────────────────────────────────────────────────────
+node.session.cmds_max = 128
+node.session.queue_depth = 32

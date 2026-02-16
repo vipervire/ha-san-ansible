@@ -1,0 +1,40 @@
+# Managed by Ansible — Corosync configuration
+# Aggressive-safe tuning profile: ~4s node death detection
+
+totem {
+    version: 2
+    cluster_name: {{ cluster_name }}
+    transport: {{ corosync_transport }}
+    crypto_cipher: {{ corosync_crypto_cipher }}
+    crypto_hash: {{ corosync_crypto_hash }}
+
+    # Aggressive-safe timing — don't go below token=3000
+    token: {{ corosync_token }}
+    consensus: {{ corosync_consensus }}
+    join: {{ corosync_join }}
+    max_messages: {{ corosync_max_messages }}
+}
+
+nodelist {
+{% for node in corosync_nodes %}
+    node {
+        ring0_addr: {{ node.ring0_addr }}
+{% if node.ring1_addr is defined %}
+        ring1_addr: {{ node.ring1_addr }}
+{% endif %}
+        name: {{ node.name }}
+        nodeid: {{ node.nodeid }}
+    }
+{% endfor %}
+}
+
+quorum {
+    provider: corosync_votequorum
+    expected_votes: {{ corosync_nodes | length }}
+}
+
+logging {
+    to_logfile: yes
+    logfile: /var/log/corosync/corosync.log
+    to_syslog: yes
+}

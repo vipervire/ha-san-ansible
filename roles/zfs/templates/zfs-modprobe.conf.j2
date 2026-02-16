@@ -1,0 +1,4 @@
+# Managed by Ansible — ZFS module parameters
+{% for key, value in zfs_modprobe_options.items() %}
+options zfs {{ key }}={{ value }}
+{% endfor %}

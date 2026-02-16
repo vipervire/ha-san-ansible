@@ -1,0 +1,60 @@
+---
+# roles/iscsi-initiator/tasks/main.yml — Backend open-iscsi initiator (always running)
+
+- name: Install open-iscsi
+  ansible.builtin.apt:
+    name: open-iscsi
+    state: present
+
+- name: Set initiator name
+  ansible.builtin.copy:
+    dest: /etc/iscsi/initiatorname.iscsi
+    content: "InitiatorName={{ iscsi_initiator_name }}\n"
+    mode: "0600"
+  notify: restart iscsid
+
+- name: Deploy iscsid.conf with aggressive-safe timeouts
+  ansible.builtin.template:
+    src: iscsid.conf.j2
+    dest: /etc/iscsi/iscsid.conf
+    mode: "0600"
+  notify: restart iscsid
+
+- name: Enable iSCSI services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - iscsid
+    - open-iscsi
+
+- name: Discover peer iSCSI targets
+  ansible.builtin.command:
+    cmd: iscsiadm -m discovery -t sendtargets -p {{ iscsi_peer_ip }}:3260
+  register: iscsi_discovery
+  changed_when: false
+  failed_when: false
+  # May fail if peer isn't configured yet; that's expected on first run
+
+- name: Log in to peer targets
+  ansible.builtin.command:
+    cmd: iscsiadm -m node -T {{ iscsi_peer_iqn }} -p {{ iscsi_peer_ip }}:3260 --login
+  register: iscsi_login
+  changed_when: "'already present' not in iscsi_login.stderr"
+  failed_when: false
+  when: iscsi_discovery.rc == 0
+
+- name: Set node to auto-login on boot
+  ansible.builtin.command:
+    cmd: iscsiadm -m node -T {{ iscsi_peer_iqn }} -p {{ iscsi_peer_ip }}:3260 -o update -n node.startup -v automatic
+  changed_when: false
+  failed_when: false
+  when: iscsi_discovery.rc == 0
+
+- name: Generate ZFS pool creation helper script (active node only)
+  ansible.builtin.template:
+    src: create-pool.sh.j2
+    dest: /root/create-pool.sh
+    mode: "0700"
+  when: inventory_hostname == pacemaker_preferred_node

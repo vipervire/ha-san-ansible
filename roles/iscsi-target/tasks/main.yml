@@ -1,0 +1,41 @@
+---
+# roles/iscsi-target/tasks/main.yml — Backend LIO iSCSI target (always running)
+
+- name: Install LIO target packages
+  ansible.builtin.apt:
+    name:
+      - targetcli-fb
+      - python3-rtslib-fb
+    state: present
+
+- name: Enable LIO target persistence service
+  ansible.builtin.systemd:
+    name: rtslib-fb-targetctl
+    enabled: true
+
+- name: Generate targetcli setup script
+  ansible.builtin.template:
+    src: setup-lio-target.sh.j2
+    dest: /root/setup-lio-target.sh
+    mode: "0700"
+
+- name: Check if iSCSI target already configured
+  ansible.builtin.command:
+    cmd: targetcli ls /iscsi/{{ iscsi_target_iqn }}
+  register: lio_check
+  failed_when: false
+  changed_when: false
+
+- name: Run LIO target setup (first time only)
+  ansible.builtin.command:
+    cmd: /root/setup-lio-target.sh
+  when: lio_check.rc != 0
+  notify: save lio config
+
+- name: Set permissions on saveconfig.json
+  ansible.builtin.file:
+    path: /etc/target/saveconfig.json
+    mode: "0600"
+    owner: root
+    group: root
+  ignore_errors: true  # file may not exist yet on first run

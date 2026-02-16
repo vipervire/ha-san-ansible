@@ -1,0 +1,43 @@
+#!/bin/bash
+# Managed by Ansible — LIO iSCSI target configuration for {{ inventory_hostname }}
+# This script is idempotent but only runs on first deployment.
+set -euo pipefail
+
+echo "=== Configuring LIO iSCSI target: {{ iscsi_target_iqn }} ==="
+
+# Create block backstores for each local data disk
+{% for disk in local_data_disks %}
+echo "Creating backstore: {{ disk.label }} -> {{ disk.device }}"
+targetcli /backstores/block create {{ disk.label }} {{ disk.device }}
+{% endfor %}
+
+# Create the iSCSI target
+echo "Creating target: {{ iscsi_target_iqn }}"
+targetcli /iscsi create {{ iscsi_target_iqn }}
+
+# Remove default portal (0.0.0.0) and bind to storage interconnect only
+targetcli /iscsi/{{ iscsi_target_iqn }}/tpg1/portals delete 0.0.0.0 3260 2>/dev/null || true
+targetcli /iscsi/{{ iscsi_target_iqn }}/tpg1/portals create {{ storage_ip }} 3260
+
+# Map LUNs
+{% for disk in local_data_disks %}
+targetcli /iscsi/{{ iscsi_target_iqn }}/tpg1/luns create /backstores/block/{{ disk.label }} lun{{ loop.index0 }}
+{% endfor %}
+
+{% if iscsi_chap_enabled %}
+# Configure CHAP authentication
+targetcli /iscsi/{{ iscsi_target_iqn }}/tpg1 set attribute authentication=1
+
+# Create ACL for peer initiator
+targetcli /iscsi/{{ iscsi_target_iqn }}/tpg1/acls create {{ iscsi_peer_iqn | regex_replace(':storage-', ':initiator-') }}
+targetcli /iscsi/{{ iscsi_target_iqn }}/tpg1/acls/{{ iscsi_peer_iqn | regex_replace(':storage-', ':initiator-') }} set auth userid={{ iscsi_chap_user }} password={{ iscsi_chap_password }}
+{% else %}
+# No CHAP — open access (testing only)
+targetcli /iscsi/{{ iscsi_target_iqn }}/tpg1 set attribute authentication=0
+targetcli /iscsi/{{ iscsi_target_iqn }}/tpg1 set attribute generate_node_acls=1
+{% endif %}
+
+# Save configuration
+targetcli saveconfig
+
+echo "=== LIO target configuration complete ==="

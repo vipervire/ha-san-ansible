@@ -1,0 +1,52 @@
+---
+# roles/services/tasks/main.yml — NFS, SMB, and client-facing iSCSI configuration
+# These services are INSTALLED but NOT ENABLED — Pacemaker manages start/stop.
+
+# ─── NFS ────────────────────────────────────────────────────────────────────
+- name: Install NFS server
+  ansible.builtin.apt:
+    name:
+      - nfs-kernel-server
+      - nfs-common
+    state: present
+
+- name: Disable NFS auto-start (Pacemaker manages this)
+  ansible.builtin.systemd:
+    name: nfs-kernel-server
+    enabled: false
+
+- name: Deploy /etc/exports
+  ansible.builtin.template:
+    src: exports.j2
+    dest: /etc/exports
+    mode: "0644"
+  notify: reload nfs exports
+
+- name: Deploy /etc/nfs.conf
+  ansible.builtin.template:
+    src: nfs.conf.j2
+    dest: /etc/nfs.conf
+    mode: "0644"
+
+# ─── Samba / SMB ────────────────────────────────────────────────────────────
+- name: Install Samba
+  ansible.builtin.apt:
+    name:
+      - samba
+      - samba-common
+    state: present
+
+- name: Disable Samba auto-start (Pacemaker manages this)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+  loop:
+    - smbd
+    - nmbd
+
+- name: Deploy smb.conf
+  ansible.builtin.template:
+    src: smb.conf.j2
+    dest: /etc/samba/smb.conf
+    mode: "0640"
+  notify: validate smb config

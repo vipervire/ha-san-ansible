@@ -1,0 +1,20 @@
+# Managed by Ansible — do not edit manually
+127.0.0.1       localhost
+::1             localhost ip6-localhost ip6-loopback
+
+# Cluster nodes — management VLAN
+{% for node in corosync_nodes %}
+{{ node.ring0_addr }}    {{ node.name }}
+{% endfor %}
+
+# Storage interconnect (private)
+{% for node in corosync_nodes %}
+{% if node.ring1_addr is defined %}
+{{ node.ring1_addr }}    {{ node.name }}-stor
+{% endif %}
+{% endfor %}
+
+# Floating VIPs
+{{ vip_nfs }}       san-nfs
+{{ vip_smb }}       san-smb
+{{ vip_iscsi }}     san-iscsi

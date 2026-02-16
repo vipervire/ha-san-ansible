@@ -1,0 +1,27 @@
+---
+# HA ZFS-over-iSCSI SAN — Ansible Inventory
+#
+# Adjust hostnames and ansible_host IPs to match your environment.
+# The management VLAN IPs are used for Ansible connectivity.
+
+all:
+  children:
+    # All three cluster members (Corosync/Pacemaker)
+    cluster:
+      children:
+        storage_nodes:
+          hosts:
+            storage-a:
+              ansible_host: 10.20.20.1
+              # Per-host overrides go in host_vars/storage-a.yml
+            storage-b:
+              ansible_host: 10.20.20.2
+        quorum_node:
+          hosts:
+            quorum:
+              ansible_host: 10.20.20.3
+
+  vars:
+    ansible_user: storageadmin
+    ansible_become: true
+    ansible_python_interpreter: /usr/bin/python3

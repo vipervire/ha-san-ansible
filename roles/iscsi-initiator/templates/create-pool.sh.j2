@@ -1,0 +1,117 @@
+#!/bin/bash
+# Managed by Ansible — ZFS pool creation helper for {{ inventory_hostname }}
+#
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  MANUAL STEP: Run this script AFTER both nodes have iSCSI sessions    ║
+# ║  established and you have verified the device paths below are correct. ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+#
+# Usage:
+#   1. Verify iSCSI sessions:  iscsiadm -m session
+#   2. List iSCSI device paths: ls -la /dev/disk/by-path/ | grep iscsi
+#   3. Update the REMOTE_DISKS array below with actual paths
+#   4. Run:  bash /root/create-pool.sh
+#
+set -euo pipefail
+
+POOL="{{ zfs_pool_name }}"
+
+# ─── Local disks (by partition label) ───────────────────────────────────────
+LOCAL_DISKS=(
+{% for disk in local_data_disks %}
+  "/dev/disk/by-partlabel/{{ disk.label }}"
+{% endfor %}
+)
+
+# ─── Remote iSCSI disks — UPDATE THESE WITH ACTUAL by-path PATHS ───────────
+# Run: ls -la /dev/disk/by-path/ | grep iscsi | sort
+# Example: ip-10.10.10.2:3260-iscsi-iqn.2025-01.lab.home:storage-b-lun-0
+REMOTE_DISKS=(
+{% for disk in local_data_disks %}
+  "FIXME:replace-with-iscsi-by-path-for-lun{{ loop.index0 }}"
+{% endfor %}
+)
+
+# ─── Verify disks exist ────────────────────────────────────────────────────
+echo "=== Verifying disk paths ==="
+errors=0
+for i in "${!LOCAL_DISKS[@]}"; do
+  if [[ ! -e "${LOCAL_DISKS[$i]}" ]]; then
+    echo "ERROR: Local disk not found: ${LOCAL_DISKS[$i]}"
+    ((errors++))
+  fi
+  if [[ "${REMOTE_DISKS[$i]}" == FIXME* ]]; then
+    echo "ERROR: Remote disk $i not configured — edit this script first"
+    ((errors++))
+  elif [[ ! -e "${REMOTE_DISKS[$i]}" ]]; then
+    echo "ERROR: Remote disk not found: ${REMOTE_DISKS[$i]}"
+    ((errors++))
+  fi
+done
+
+if [[ $errors -gt 0 ]]; then
+  echo ""
+  echo "Found $errors errors. Fix disk paths and re-run."
+  echo "Hint: ls -la /dev/disk/by-path/ | grep iscsi"
+  exit 1
+fi
+
+# ─── Label local disks with GPT partition labels ──────────────────────────
+echo "=== Labeling local disks ==="
+{% for disk in local_data_disks %}
+echo "Labeling {{ disk.device }} as {{ disk.label }}"
+sgdisk -Z {{ disk.device }} 2>/dev/null || true
+sgdisk -n1:0:0 -t1:bf01 -c1:"{{ disk.label }}" {{ disk.device }}
+{% endfor %}
+
+# Wait for udev to settle
+udevadm settle
+
+# ─── Build zpool create command ────────────────────────────────────────────
+echo "=== Creating ZFS pool: $POOL ==="
+
+MIRROR_ARGS=""
+for i in "${!LOCAL_DISKS[@]}"; do
+  MIRROR_ARGS+="  mirror ${LOCAL_DISKS[$i]} ${REMOTE_DISKS[$i]}"
+  if [[ $i -lt $((${#LOCAL_DISKS[@]} - 1)) ]]; then
+    MIRROR_ARGS+=" \\"$'\n'
+  fi
+done
+
+set -x
+zpool create \
+  -o multihost=on \
+  -o ashift={{ zfs_pool_ashift }} \
+{% for key, value in zfs_pool_options.items() %}
+  -o {{ key }}={{ value }} \
+{% endfor %}
+{% for key, value in zfs_dataset_options.items() %}
+  -O {{ key }}={{ value }} \
+{% endfor %}
+  "$POOL" \
+$MIRROR_ARGS
+set +x
+
+echo ""
+echo "=== Pool created successfully ==="
+zpool status "$POOL"
+echo ""
+echo "=== Creating datasets ==="
+{% for ds in zfs_datasets %}
+zfs create \
+{% for key, value in ds.properties.items() %}
+  -o {{ key }}={{ value }} \
+{% endfor %}
+  {{ ds.name }}
+echo "Created: {{ ds.name }}"
+{% endfor %}
+
+echo ""
+echo "=== Pool and datasets ready ==="
+zfs list -r "$POOL"
+echo ""
+echo "Next steps:"
+echo "  1. Verify:  zpool status $POOL"
+echo "  2. Export:   zpool export $POOL"
+echo "  3. Test import on Node B:  zpool import -f -o cachefile=none $POOL"
+echo "  4. Then configure Pacemaker resources (run the cluster playbook)"

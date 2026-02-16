@@ -1,0 +1,41 @@
+---
+# roles/cockpit/tasks/main.yml — Cockpit + 45Drives Houston plugins
+
+- name: Install Cockpit
+  ansible.builtin.apt:
+    name:
+      - cockpit
+      - cockpit-storaged
+      - cockpit-networkmanager
+      - cockpit-packagekit
+    state: present
+
+- name: Enable Cockpit socket
+  ansible.builtin.systemd:
+    name: cockpit.socket
+    enabled: true
+    state: started
+
+# ─── 45Drives Houston plugins ─────────────────────────────────────────────
+# These are optional — install from 45Drives repo or GitHub releases.
+
+- name: Add 45Drives repo key and source
+  ansible.builtin.shell: |
+    curl -sSL https://repo.45drives.com/setup | bash
+  args:
+    creates: /etc/apt/sources.list.d/45drives.list
+  register: repo_added
+
+- name: Update apt cache after adding 45Drives repo
+  ansible.builtin.apt:
+    update_cache: true
+  when: repo_added.changed
+
+- name: Install 45Drives Houston Cockpit plugins
+  ansible.builtin.apt:
+    name:
+      - cockpit-file-sharing    # NFS + SMB management
+      - cockpit-identities      # User/group management
+      - cockpit-navigator       # File browser
+    state: present
+  ignore_errors: true  # repo may not have packages for your arch/release

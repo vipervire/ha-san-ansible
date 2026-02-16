@@ -1,0 +1,25 @@
+# Managed by Ansible — SSH hardening
+{% if ssh_listen_addresses | length > 0 %}
+{% for addr in ssh_listen_addresses %}
+ListenAddress {{ addr }}
+{% endfor %}
+{% endif %}
+
+Port {{ ssh_port }}
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+MaxAuthTries 3
+LoginGraceTime 30
+{% if ssh_allowed_users | length > 0 %}
+AllowUsers {{ ssh_allowed_users | join(' ') }}
+{% endif %}
+X11Forwarding no
+AllowTcpForwarding no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com

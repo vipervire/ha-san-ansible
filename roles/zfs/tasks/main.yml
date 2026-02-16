@@ -1,0 +1,77 @@
+---
+# roles/zfs/tasks/main.yml — ZFS installation and configuration
+
+- name: Install ZFS prerequisites
+  ansible.builtin.apt:
+    name:
+      - linux-headers-{{ ansible_kernel }}
+      - dkms
+      - dpkg-dev
+    state: present
+
+- name: Add Debian contrib and non-free repos for ZFS
+  ansible.builtin.apt_repository:
+    repo: "deb http://deb.debian.org/debian {{ ansible_distribution_release }} main contrib non-free"
+    state: present
+    filename: debian-contrib
+
+- name: Install ZFS packages
+  ansible.builtin.apt:
+    name:
+      - zfsutils-linux
+      - zfs-dkms
+    state: present
+    update_cache: true
+
+- name: Deploy ZFS module parameters
+  ansible.builtin.template:
+    src: zfs-modprobe.conf.j2
+    dest: /etc/modprobe.d/zfs.conf
+    mode: "0644"
+  notify: reload zfs module params
+
+- name: Ensure ZFS kernel module is loaded
+  community.general.modprobe:
+    name: zfs
+    state: present
+
+- name: Enable ZFS services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - zfs-import-cache
+    - zfs-mount
+    - zfs.target
+
+- name: Install sanoid for automated snapshots
+  when: sanoid_install | default(false)
+  block:
+    - name: Install sanoid dependencies
+      ansible.builtin.apt:
+        name:
+          - debhelper
+          - libcapture-tiny-perl
+          - libconfig-inifiles-perl
+          - pv
+          - lzop
+          - mbuffer
+        state: present
+
+    - name: Install sanoid from Debian repos
+      ansible.builtin.apt:
+        name: sanoid
+        state: present
+
+    - name: Deploy sanoid configuration
+      ansible.builtin.template:
+        src: sanoid.conf.j2
+        dest: /etc/sanoid/sanoid.conf
+        mode: "0644"
+
+    - name: Enable sanoid timer
+      ansible.builtin.systemd:
+        name: sanoid.timer
+        enabled: true
+        state: started

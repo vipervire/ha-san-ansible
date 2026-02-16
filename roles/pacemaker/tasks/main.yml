@@ -1,0 +1,123 @@
+---
+# roles/pacemaker/tasks/main.yml — Pacemaker/Corosync cluster setup
+
+- name: Install Pacemaker and Corosync
+  ansible.builtin.apt:
+    name:
+      - pacemaker
+      - corosync
+      - pcs
+      - crmsh
+      - fence-agents
+    state: present
+
+- name: Set hacluster user password
+  ansible.builtin.user:
+    name: hacluster
+    password: "{{ hacluster_password | password_hash('sha512') }}"
+
+- name: Enable pcsd service
+  ansible.builtin.systemd:
+    name: pcsd
+    enabled: true
+    state: started
+
+- name: Deploy corosync.conf
+  ansible.builtin.template:
+    src: corosync.conf.j2
+    dest: /etc/corosync/corosync.conf
+    mode: "0644"
+  notify: restart corosync
+
+- name: Enable Corosync and Pacemaker
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+  loop:
+    - corosync
+    - pacemaker
+
+# ─── Cluster initialization (run once from first storage node) ─────────────
+- name: Authenticate cluster nodes
+  ansible.builtin.command:
+    cmd: >
+      pcs host auth
+      {% for node in corosync_nodes %}
+      {{ node.name }} addr={{ node.ring0_addr }}
+      {% endfor %}
+      -u hacluster -p {{ hacluster_password }}
+  run_once: true
+  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  changed_when: false
+  failed_when: false
+
+- name: Check if cluster exists
+  ansible.builtin.command:
+    cmd: pcs cluster status
+  register: cluster_status
+  changed_when: false
+  failed_when: false
+  run_once: true
+  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+
+- name: Create cluster (first time only)
+  ansible.builtin.command:
+    cmd: >
+      pcs cluster setup {{ cluster_name }}
+      {% for node in corosync_nodes %}
+      {{ node.name }} addr={{ node.ring0_addr }}
+      {% endfor %}
+  run_once: true
+  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  when: cluster_status.rc != 0
+
+- name: Start cluster on all nodes
+  ansible.builtin.command:
+    cmd: pcs cluster start --all
+  run_once: true
+  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  changed_when: false
+  failed_when: false
+
+- name: Enable cluster auto-start on all nodes
+  ansible.builtin.command:
+    cmd: pcs cluster enable --all
+  run_once: true
+  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  changed_when: false
+  failed_when: false
+
+# ─── Cluster properties and STONITH (run once) ────────────────────────────
+- name: Configure cluster properties
+  ansible.builtin.command:
+    cmd: "pcs property set {{ item }}"
+  loop:
+    - "stonith-enabled=true"
+    - "no-quorum-policy=stop"
+  run_once: true
+  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  changed_when: false
+  failed_when: false
+
+- name: Set default resource stickiness
+  ansible.builtin.command:
+    cmd: pcs resource defaults update resource-stickiness={{ pacemaker_resource_stickiness }}
+  run_once: true
+  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  changed_when: false
+  failed_when: false
+
+- name: Generate Pacemaker resource configuration script
+  ansible.builtin.template:
+    src: configure-resources.sh.j2
+    dest: /root/configure-pacemaker-resources.sh
+    mode: "0700"
+  when: inventory_hostname == pacemaker_preferred_node | default('storage-a')
+
+# ─── STONITH setup (delegated to preferred node) ─────────────────────────
+- name: Generate STONITH configuration script
+  ansible.builtin.template:
+    src: configure-stonith.sh.j2
+    dest: /root/configure-stonith.sh
+    mode: "0700"
+  when: inventory_hostname == pacemaker_preferred_node | default('storage-a')

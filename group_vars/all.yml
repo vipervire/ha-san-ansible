@@ -1,0 +1,89 @@
+---
+# =============================================================================
+# HA ZFS-over-iSCSI SAN — Global Variables
+# =============================================================================
+# These variables are shared across ALL nodes (storage + quorum).
+# Override per-group in group_vars/storage_nodes.yml or per-host in host_vars/.
+
+# ---------------------------------------------------------------------------
+# Cluster identity
+# ---------------------------------------------------------------------------
+cluster_name: san-cluster
+hacluster_password: "CHANGEME-use-ansible-vault"  # vault this in production
+
+# ---------------------------------------------------------------------------
+# Network — VLANs & Subnets
+# ---------------------------------------------------------------------------
+# Adjust VLAN IDs, subnets, and interface names to match your hardware.
+# The playbook uses these to build configs; it does NOT configure switch ports.
+
+vlans:
+  storage:
+    id: 10
+    subnet: "10.10.10.0/24"
+    mtu: 9000
+    description: "iSCSI replication between storage nodes"
+  management:
+    id: 20
+    subnet: "10.20.20.0/24"
+    mtu: 1500
+    description: "Corosync, Pacemaker, SSH, IPMI"
+  client:
+    id: 30
+    subnet: "10.30.30.0/24"
+    mtu: 9000  # set to 1500 if not all clients support jumbo
+    description: "NFS, SMB, iSCSI client traffic"
+
+# Floating VIPs — managed by Pacemaker, bind to client VLAN
+vip_nfs: "10.30.30.10"
+vip_smb: "10.30.30.11"
+vip_iscsi: "10.30.30.12"
+vip_cidr: 24
+
+# ---------------------------------------------------------------------------
+# Corosync — Aggressive-Safe Tuning
+# ---------------------------------------------------------------------------
+corosync_token: 4000        # 4s to declare node dead (don't go below 3000)
+corosync_consensus: 4800    # 1.2× token
+corosync_join: 1000
+corosync_max_messages: 20
+corosync_transport: knet
+corosync_crypto_cipher: aes256
+corosync_crypto_hash: sha256
+
+# Node definitions for corosync.conf — ring0 = mgmt, ring1 = storage (optional)
+corosync_nodes:
+  - name: storage-a
+    nodeid: 1
+    ring0_addr: "10.20.20.1"
+    ring1_addr: "10.10.10.1"   # storage VLAN — redundant ring
+  - name: storage-b
+    nodeid: 2
+    ring0_addr: "10.20.20.2"
+    ring1_addr: "10.10.10.2"
+  - name: quorum
+    nodeid: 3
+    ring0_addr: "10.20.20.3"
+    # No ring1 — quorum node has no storage VLAN
+
+# ---------------------------------------------------------------------------
+# NTP
+# ---------------------------------------------------------------------------
+ntp_servers:
+  - "0.debian.pool.ntp.org"
+  - "1.debian.pool.ntp.org"
+
+# ---------------------------------------------------------------------------
+# SSH hardening
+# ---------------------------------------------------------------------------
+ssh_listen_addresses: []  # override per-host; empty = all interfaces
+ssh_allowed_users:
+  - storageadmin
+ssh_port: 22
+
+# ---------------------------------------------------------------------------
+# Admin user
+# ---------------------------------------------------------------------------
+admin_user: storageadmin
+# Place your public key here or load from file
+admin_ssh_pubkey: "ssh-ed25519 AAAA... your-key-here"

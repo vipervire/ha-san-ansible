@@ -1,0 +1,9 @@
+---
+- name: reload zfs module params
+  ansible.builtin.shell: |
+    # Apply new params without full module reload (would require unmounting pools)
+    # These take effect on next module load (reboot) or can be set live:
+    {% for key, value in zfs_modprobe_options.items() %}
+    echo {{ value }} > /sys/module/zfs/parameters/{{ key }} 2>/dev/null || true
+    {% endfor %}
+  changed_when: true

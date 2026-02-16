@@ -1,0 +1,42 @@
+#!/bin/bash
+# Managed by Ansible — STONITH fencing configuration
+# Run AFTER cluster is formed and all nodes are online.
+# Usage: bash /root/configure-stonith.sh
+set -euo pipefail
+
+echo "=== Configuring STONITH fencing ==="
+
+{% if stonith_method == 'ipmi' %}
+# ─── IPMI Fencing ───────────────────────────────────────────────────────────
+{% for node, cfg in stonith_ipmi.items() %}
+echo "Creating IPMI fence agent for {{ node }}"
+pcs stonith create fence-{{ node }} fence_ipmilan \
+  ipaddr="{{ cfg.ip }}" \
+  login="{{ cfg.user }}" \
+  passwd="{{ cfg.password }}" \
+  lanplus=1 \
+  pcmk_host_list="{{ node }}" \
+  pcmk_reboot_timeout=30 \
+  power_timeout=20 \
+  op monitor interval=60s 2>/dev/null || \
+  echo "  (fence-{{ node }} may already exist)"
+{% endfor %}
+
+{% elif stonith_method == 'smart_plug' %}
+# ─── Smart Plug Fencing ────────────────────────────────────────────────────
+{% for node, cfg in stonith_smart_plug.items() %}
+echo "Creating smart plug fence agent for {{ node }}"
+pcs stonith create fence-{{ node }} external/smart-plug \
+  ip="{{ cfg.ip }}" \
+  plug="{{ cfg.plug }}" \
+  pcmk_host_list="{{ node }}" 2>/dev/null || \
+  echo "  (fence-{{ node }} may already exist)"
+{% endfor %}
+{% endif %}
+
+# Prevent STONITH resources from running on quorum node
+pcs constraint location fence-storage-a avoids quorum=INFINITY 2>/dev/null || true
+pcs constraint location fence-storage-b avoids quorum=INFINITY 2>/dev/null || true
+
+echo "=== STONITH configuration complete ==="
+echo "Test with: pcs stonith fence storage-b  (BE CAREFUL — this WILL power off the node)"
