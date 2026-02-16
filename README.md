@@ -171,6 +171,7 @@ zpool status san-pool
 - **Disk layout**: Edit `local_data_disks` in `host_vars/` for your drives
 - **VLANs/subnets**: Edit `vlans` dict in `group_vars/all.yml`
 - **STONITH method**: Switch between `ipmi` and `smart_plug` in `storage_nodes.yml`
+  - Smart plug guide: `docs/stonith-smart-plugs.md` (TP-Link Kasa, ESPHome, Tasmota)
 - **Snapshot policy**: Edit `sanoid_templates` in `storage_nodes.yml`
 - **ZFS scrub schedule**: Edit `zfs_scrub_schedule` in `storage_nodes.yml` (default: monthly on 1st at 2 AM)
   - Use systemd OnCalendar syntax: `"*-*-01 02:00:00"` = 1st of month at 2am
@@ -205,6 +206,7 @@ This playbook deploys comprehensive monitoring for both storage and cluster heal
 
 **Documentation**:
 - Cluster monitoring guide: `docs/cluster-monitoring.md`
+- STONITH smart plug setup: `docs/stonith-smart-plugs.md`
 - Example Prometheus alert rules: `docs/prometheus-alerts.yml`
 - NTFY integration guide: `docs/ntfy-integration.md`
 

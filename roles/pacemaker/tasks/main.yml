@@ -11,6 +11,13 @@
       - fence-agents
     state: present
 
+- name: Install TP-Link Kasa fence agent dependencies
+  ansible.builtin.apt:
+    name:
+      - python3-kasa
+    state: present
+  when: stonith_method == 'smart_plug' and stonith_smart_plug_type == 'kasa'
+
 - name: Set hacluster user password
   ansible.builtin.user:
     name: hacluster

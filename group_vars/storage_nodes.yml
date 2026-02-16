@@ -131,26 +131,41 @@ smb_shares:
 # Choose your fencing method. Uncomment the one you're using.
 
 # Option A: IPMI (preferred if BMC is available)
-stonith_method: "ipmi"
-stonith_ipmi:
-  storage-a:
-    ip: "10.20.20.101"   # BMC IP for storage-a
-    user: "bmcadmin"
-    password: "CHANGEME-vault-this"
-  storage-b:
-    ip: "10.20.20.102"   # BMC IP for storage-b
-    user: "bmcadmin"
-    password: "CHANGEME-vault-this"
+# stonith_method: "ipmi"
+# stonith_ipmi:
+#   storage-a:
+#     ip: "10.20.20.101"   # BMC IP for storage-a
+#     user: "bmcadmin"
+#     password: "CHANGEME-vault-this"
+#   storage-b:
+#     ip: "10.20.20.102"   # BMC IP for storage-b
+#     user: "bmcadmin"
+#     password: "CHANGEME-vault-this"
 
-# Option B: Smart plug (uncomment and set stonith_method: "smart_plug")
-# stonith_method: "smart_plug"
+# Option B: Smart plugs (kasa, esphome, tasmota, or generic http)
+stonith_method: "smart_plug"
+stonith_smart_plug_type: "kasa"  # Options: kasa, esphome, tasmota, http
+stonith_smart_plug:
+  storage-a:
+    ip: "10.20.20.201"   # Smart plug controlling storage-a
+    # For kasa: no credentials needed (local protocol)
+    # For esphome/tasmota: optionally add user/password/switch_name
+  storage-b:
+    ip: "10.20.20.202"   # Smart plug controlling storage-b
+
+# ESPHome example (uncomment and modify if using ESPHome):
+# stonith_smart_plug_type: "esphome"
 # stonith_smart_plug:
 #   storage-a:
 #     ip: "10.20.20.201"
-#     plug: 1
+#     switch_name: "relay"       # Must match ESPHome switch ID
+#     user: "admin"              # optional if web auth enabled
+#     password: "your-password"  # optional if web auth enabled
 #   storage-b:
 #     ip: "10.20.20.202"
-#     plug: 1
+#     switch_name: "relay"
+#     user: "admin"
+#     password: "your-password"
 
 # ---------------------------------------------------------------------------
 # Pacemaker resource configuration

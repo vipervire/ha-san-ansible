@@ -24,14 +24,69 @@ pcs stonith create fence-{{ node }} fence_ipmilan \
 
 {% elif stonith_method == 'smart_plug' %}
 # ─── Smart Plug Fencing ────────────────────────────────────────────────────
+{% if stonith_smart_plug_type == 'kasa' %}
+# TP-Link Kasa plugs via fence_kasa (requires python3-kasa package)
 {% for node, cfg in stonith_smart_plug.items() %}
-echo "Creating smart plug fence agent for {{ node }}"
-pcs stonith create fence-{{ node }} external/smart-plug \
+echo "Creating TP-Link Kasa fence agent for {{ node }}"
+pcs stonith create fence-{{ node }} fence_kasa \
   ip="{{ cfg.ip }}" \
-  plug="{{ cfg.plug }}" \
-  pcmk_host_list="{{ node }}" 2>/dev/null || \
+  pcmk_host_list="{{ node }}" \
+  pcmk_reboot_action="off" \
+  pcmk_off_timeout="30s" \
+  pcmk_on_timeout="30s" \
+  op monitor interval=60s 2>/dev/null || \
   echo "  (fence-{{ node }} may already exist)"
 {% endfor %}
+
+{% elif stonith_smart_plug_type == 'tasmota' %}
+# Tasmota-flashed plugs via fence_http (custom power commands)
+{% for node, cfg in stonith_smart_plug.items() %}
+echo "Creating Tasmota fence agent for {{ node }}"
+pcs stonith create fence-{{ node }} fence_http \
+  ip="{{ cfg.ip }}" \
+  username="{{ cfg.user | default('admin') }}" \
+  password="{{ cfg.password | default('') }}" \
+  power_off_url="/cm?cmnd=Power%20OFF" \
+  power_on_url="/cm?cmnd=Power%20ON" \
+  status_url="/cm?cmnd=Power" \
+  status_on_regex="ON" \
+  status_off_regex="OFF" \
+  pcmk_host_list="{{ node }}" \
+  op monitor interval=60s 2>/dev/null || \
+  echo "  (fence-{{ node }} may already exist)"
+{% endfor %}
+
+{% elif stonith_smart_plug_type == 'esphome' %}
+# ESPHome-flashed plugs via fence_http (HTTP REST API)
+{% for node, cfg in stonith_smart_plug.items() %}
+echo "Creating ESPHome fence agent for {{ node }}"
+pcs stonith create fence-{{ node }} fence_http \
+  ip="{{ cfg.ip }}" \
+  username="{{ cfg.user | default('') }}" \
+  password="{{ cfg.password | default('') }}" \
+  power_off_url="/switch/{{ cfg.switch_name | default('relay') }}/turn_off" \
+  power_on_url="/switch/{{ cfg.switch_name | default('relay') }}/turn_on" \
+  status_url="/switch/{{ cfg.switch_name | default('relay') }}" \
+  status_on_regex='"state":"ON"' \
+  status_off_regex='"state":"OFF"' \
+  pcmk_host_list="{{ node }}" \
+  op monitor interval=60s 2>/dev/null || \
+  echo "  (fence-{{ node }} may already exist)"
+{% endfor %}
+
+{% else %}
+# Generic HTTP-based smart plug
+{% for node, cfg in stonith_smart_plug.items() %}
+echo "Creating HTTP fence agent for {{ node }}"
+pcs stonith create fence-{{ node }} fence_http \
+  ip="{{ cfg.ip }}" \
+  username="{{ cfg.user }}" \
+  password="{{ cfg.password }}" \
+  pcmk_host_list="{{ node }}" \
+  op monitor interval=60s 2>/dev/null || \
+  echo "  (fence-{{ node }} may already exist)"
+{% endfor %}
+{% endif %}
 {% endif %}
 
 # Prevent STONITH resources from running on quorum node
