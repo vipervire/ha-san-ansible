@@ -175,6 +175,54 @@ zpool status san-pool
 - **ZFS scrub schedule**: Edit `zfs_scrub_schedule` in `storage_nodes.yml` (default: monthly on 1st at 2 AM)
   - Use systemd OnCalendar syntax: `"*-*-01 02:00:00"` = 1st of month at 2am
   - Disable with `zfs_scrub_enabled: false`
+  - Monitoring: See `docs/ntfy-integration.md` for Prometheus + NTFY alerting setup
 - **SMB shares**: Add entries to `smb_shares` list
 - **NFS exports**: Add entries to `nfs_exports` list
 - **iSCSI zvols**: Create manually with `zfs create -V <size> san-pool/iscsi/<name>`
+
+## Monitoring and Alerting
+
+This playbook deploys comprehensive monitoring for both storage and cluster health:
+
+### Node-Level Metrics (node_exporter:9100)
+- CPU, memory, disk, network, systemd services
+- Deployed on all nodes (storage-a, storage-b, quorum)
+
+### ZFS Storage Metrics (custom exporter, updated every 5 min)
+- `zfs_scrub_last_run_timestamp_seconds` - When last scrub completed
+- `zfs_scrub_last_run_errors_total` - Errors found in last scrub
+- `zfs_scrub_in_progress` - Whether scrub is currently running
+- `zfs_scrub_pool_health` - Pool health status (0=ONLINE, 1=DEGRADED, etc.)
+- `zfs_scrub_pool_imported` - Whether pool is imported on this node
+
+### Cluster Health Metrics (ha_cluster_exporter:9664, updated every 30 sec)
+- `ha_cluster_corosync_quorate` - Cluster quorum status
+- `ha_cluster_pacemaker_nodes` - Node online/offline status
+- `ha_cluster_pacemaker_resources` - Resource health and location
+- `ha_cluster_pacemaker_fail_count` - Resource failure counts
+- `ha_cluster_pacemaker_stonith_enabled` - STONITH status
+- `ha_cluster_corosync_rings` - Corosync ring health
+
+**Documentation**:
+- Cluster monitoring guide: `docs/cluster-monitoring.md`
+- Example Prometheus alert rules: `docs/prometheus-alerts.yml`
+- NTFY integration guide: `docs/ntfy-integration.md`
+
+**Alert Coverage**:
+- Storage: overdue scrubs, scrub errors, pool degradation, split-brain
+- Cluster: quorum loss, node offline, resource failures, STONITH status, failover detection
+
+**Grafana Dashboard**: Import dashboard #12229 from Grafana.com for pre-built cluster visualization.
+
+**Quick Check**:
+```bash
+# View ZFS metrics
+curl http://10.20.20.1:9100/metrics | grep zfs_scrub
+
+# View cluster metrics
+curl http://10.20.20.1:9664/metrics | grep ha_cluster
+
+# Check exporters
+systemctl status zfs-scrub-exporter.timer
+systemctl status prometheus-hacluster-exporter
+```

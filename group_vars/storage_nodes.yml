@@ -45,6 +45,9 @@ zfs_scrub_randomized_delay_sec: 1800   # 30 minutes random delay
 zfs_scrub_skip_on_degraded: true       # Skip if pool is degraded
 zfs_scrub_min_interval_days: 25        # Minimum days between scrubs
 
+# ZFS scrub monitoring (Prometheus metrics)
+zfs_scrub_monitoring_enabled: true     # Export scrub metrics for Prometheus
+
 # Datasets to create after pool exists
 zfs_datasets:
   - name: "{{ zfs_pool_name }}/nfs"

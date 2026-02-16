@@ -1,0 +1,12 @@
+# Managed by Ansible — ZFS scrub metrics exporter timer
+[Unit]
+Description=Run ZFS scrub metrics exporter every 5 minutes
+Documentation=man:zpool-status(8)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

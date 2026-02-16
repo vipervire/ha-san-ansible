@@ -1,0 +1,270 @@
+# Example Prometheus Alert Rules for ZFS Scrub Monitoring
+#
+# Add this file to your Prometheus server configuration:
+# 1. Copy to your Prometheus rules directory (e.g., /etc/prometheus/rules/)
+# 2. Add to prometheus.yml:
+#    rule_files:
+#      - "rules/prometheus-alerts.yml"
+# 3. Reload Prometheus: systemctl reload prometheus
+
+groups:
+  - name: zfs_scrub_alerts
+    interval: 5m
+    rules:
+      # Alert if no scrub has run in over 35 days
+      - alert: ZFSScrubOverdue
+        expr: |
+          (time() - zfs_scrub_last_run_timestamp_seconds{pool="san-pool"} > 35 * 86400)
+          and zfs_scrub_pool_imported{pool="san-pool"} == 1
+        for: 1h
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "ZFS scrub overdue on {{ $labels.instance }}"
+          description: |
+            Pool {{ $labels.pool }} on {{ $labels.instance }} has not been scrubbed in over 35 days.
+            Last scrub: {{ $value | humanizeDuration }} ago.
+            Monthly scrubs are recommended for data integrity verification.
+
+      # Alert if scrub has never run (and pool is imported)
+      - alert: ZFSScrubNeverRun
+        expr: |
+          zfs_scrub_last_run_timestamp_seconds{pool="san-pool"} == 0
+          and zfs_scrub_pool_imported{pool="san-pool"} == 1
+        for: 24h
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "ZFS scrub has never run on {{ $labels.instance }}"
+          description: |
+            Pool {{ $labels.pool }} on {{ $labels.instance }} has never been scrubbed.
+            Consider running a manual scrub: systemctl start zfs-scrub@san-pool.service
+
+      # Alert if last scrub found errors
+      - alert: ZFSScrubErrors
+        expr: zfs_scrub_last_run_errors_total{pool="san-pool"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "ZFS scrub found errors on {{ $labels.instance }}"
+          description: |
+            Pool {{ $labels.pool }} on {{ $labels.instance }} found {{ $value }} errors during last scrub.
+            Data corruption detected! Investigate immediately with: zpool status -v {{ $labels.pool }}
+
+      # Alert if pool is degraded
+      - alert: ZFSPoolDegraded
+        expr: zfs_scrub_pool_health{pool="san-pool"} >= 1
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "ZFS pool degraded on {{ $labels.instance }}"
+          description: |
+            Pool {{ $labels.pool }} on {{ $labels.instance }} is in {{ $labels.state }} state.
+            Check pool status: zpool status {{ $labels.pool }}
+            Scrubs are automatically skipped while pool is degraded.
+
+      # Alert if metrics exporter fails
+      - alert: ZFSScrubExporterFailed
+        expr: zfs_scrub_exporter_success == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "ZFS scrub metrics exporter failing on {{ $labels.instance }}"
+          description: |
+            The ZFS scrub metrics exporter on {{ $labels.instance }} is not producing valid metrics.
+            Check logs: journalctl -u zfs-scrub-exporter.service
+
+      # Alert if scrub has been running for unusually long (>12 hours)
+      - alert: ZFSScrubStalled
+        expr: zfs_scrub_in_progress{pool="san-pool"} == 1
+        for: 12h
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "ZFS scrub running for over 12 hours on {{ $labels.instance }}"
+          description: |
+            Pool {{ $labels.pool }} on {{ $labels.instance }} has been scrubbing for over 12 hours.
+            This is unusual for SSD-based pools. Check if scrub is making progress:
+            watch zpool status {{ $labels.pool }}
+
+      # Alert if both nodes think they have the pool imported (split-brain warning)
+      - alert: ZFSPoolSplitBrain
+        expr: sum(zfs_scrub_pool_imported{pool="san-pool"}) > 1
+        for: 1m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "ZFS pool imported on multiple nodes simultaneously"
+          description: |
+            Pool san-pool is imported on {{ $value }} nodes. This should never happen!
+            Possible Pacemaker failure or multihost protection bypass.
+            Investigate immediately to prevent data corruption.
+
+  # =========================================================================
+  # Pacemaker/Corosync Cluster Health Alerts
+  # =========================================================================
+  - name: ha_cluster_alerts
+    interval: 30s
+    rules:
+      # ─── Quorum and Cluster Health ─────────────────────────────────
+      - alert: ClusterQuorumLost
+        expr: ha_cluster_corosync_quorate == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "Cluster quorum lost"
+          description: |
+            Cluster {{ $labels.cluster }} has lost quorum.
+            Cluster resources will be stopped to prevent split-brain.
+            Check node status: pcs status
+
+      - alert: ClusterNodeOffline
+        expr: ha_cluster_pacemaker_nodes{type="member",status="offline"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "Cluster node {{ $labels.node }} is offline"
+          description: |
+            Node {{ $labels.node }} in cluster {{ $labels.cluster }} is offline.
+            Check node connectivity and cluster status: pcs status
+
+      # ─── Resource Health ────────────────────────────────────────────
+      - alert: ClusterResourceFailed
+        expr: ha_cluster_pacemaker_fail_count > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "Resource {{ $labels.resource }} failing on {{ $labels.node }}"
+          description: |
+            Resource {{ $labels.resource }} has {{ $value }} failures on node {{ $labels.node }}.
+            Check resource status: pcs status
+            Check logs: journalctl -u pacemaker -f
+
+      - alert: ClusterResourceStopped
+        expr: ha_cluster_pacemaker_resources{status="stopped",managed="true"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: cluster
+        annotations:
+          summary: "Managed resource {{ $labels.resource }} is stopped"
+          description: |
+            Resource {{ $labels.resource }} is stopped but should be managed.
+            This may indicate a failover or resource issue.
+            Check status: pcs resource status {{ $labels.resource }}
+
+      # ─── STONITH / Fencing ──────────────────────────────────────────
+      - alert: StonithDisabled
+        expr: ha_cluster_pacemaker_stonith_enabled == 0
+        for: 10m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "STONITH is disabled in cluster"
+          description: |
+            STONITH (fencing) is disabled in cluster {{ $labels.cluster }}.
+            This is unsafe for production - split-brain can cause data corruption.
+            Enable STONITH: pcs property set stonith-enabled=true
+
+      # ─── Corosync Ring Health ───────────────────────────────────────
+      - alert: CorosyncRingFaulty
+        expr: ha_cluster_corosync_ring_errors > 0
+        for: 2m
+        labels:
+          severity: warning
+          component: cluster
+        annotations:
+          summary: "Corosync ring errors on {{ $labels.node }}"
+          description: |
+            Corosync ring {{ $labels.ring_id }} on {{ $labels.node }} has errors.
+            Check ring status: corosync-cfgtool -s
+            Check network connectivity on management VLAN
+
+      - alert: CorosyncMembershipChanges
+        expr: rate(ha_cluster_corosync_member_votes[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: cluster
+        annotations:
+          summary: "Frequent cluster membership changes detected"
+          description: |
+            Cluster {{ $labels.cluster }} is experiencing frequent membership changes.
+            This may indicate network instability or node issues.
+            Check: corosync-quorumtool and pcs status
+
+      # ─── Failover Detection ─────────────────────────────────────────
+      - alert: ResourceFailoverDetected
+        expr: changes(ha_cluster_pacemaker_location_constraints[5m]) > 0
+        for: 1m
+        labels:
+          severity: info
+          component: cluster
+        annotations:
+          summary: "Resource failover detected in cluster"
+          description: |
+            Resource location constraints have changed in the last 5 minutes.
+            This may indicate a planned or unplanned failover.
+            Cluster: {{ $labels.cluster }}
+            Check: pcs status
+
+      # ─── Resource Constraints ────────────────────────────────────────
+      - alert: ResourceMigrationThresholdReached
+        expr: ha_cluster_pacemaker_fail_count >= ha_cluster_pacemaker_migration_threshold
+        for: 30s
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "Resource {{ $labels.resource }} reached migration threshold"
+          description: |
+            Resource {{ $labels.resource }} on node {{ $labels.node }} has reached its migration threshold.
+            The resource will be migrated to another node.
+            Failures: {{ $value }}
+            Check: pcs resource failcount show {{ $labels.resource }}
+
+      # ─── Split-Brain Prevention ──────────────────────────────────────
+      - alert: ClusterSplitBrainRisk
+        expr: count(ha_cluster_corosync_quorate == 1) > 1
+        for: 30s
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "Multiple nodes reporting quorum - split-brain risk!"
+          description: |
+            Multiple cluster nodes are simultaneously reporting quorum.
+            This is a split-brain condition - IMMEDIATE ATTENTION REQUIRED.
+            {{ $value }} nodes reporting quorum.
+            Manually verify cluster state on all nodes: pcs status
+
+      # ─── Exporter Health ──────────────────────────────────────────────
+      - alert: HAClusterExporterDown
+        expr: up{job="ha_cluster"} == 0
+        for: 3m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "HA cluster exporter down on {{ $labels.instance }}"
+          description: |
+            The ha_cluster_exporter on {{ $labels.instance }} is not responding.
+            Check service: systemctl status prometheus-hacluster-exporter
+            Check logs: journalctl -u prometheus-hacluster-exporter

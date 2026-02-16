@@ -74,6 +74,13 @@ ntp_servers:
   - "1.debian.pool.ntp.org"
 
 # ---------------------------------------------------------------------------
+# Monitoring — Cluster metrics (Pacemaker/Corosync)
+# ---------------------------------------------------------------------------
+ha_cluster_monitoring_enabled: true        # Enable/disable cluster monitoring
+ha_cluster_exporter_port: 9664             # Standard port for ha_cluster_exporter
+ha_cluster_exporter_address: "{{ mgmt_ip | default('0.0.0.0') }}"  # Listen on mgmt VLAN
+
+# ---------------------------------------------------------------------------
 # SSH hardening
 # ---------------------------------------------------------------------------
 ssh_listen_addresses: []  # override per-host; empty = all interfaces

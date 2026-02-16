@@ -1,0 +1,18 @@
+# Managed by Ansible — ZFS scrub metrics exporter service
+[Unit]
+Description=ZFS scrub metrics exporter for Prometheus
+After=zfs-import.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/zfs-scrub-exporter
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zfs-scrub-exporter
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/prometheus/node-exporter

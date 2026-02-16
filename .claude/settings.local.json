@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(zpool status:*)"
+      "Bash(zpool status:*)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

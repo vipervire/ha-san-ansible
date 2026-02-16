@@ -1,0 +1,10 @@
+# Managed by Ansible — HA Cluster Exporter configuration
+# Prometheus exporter for Pacemaker/Corosync cluster metrics
+
+# Listen address (management VLAN only for security)
+ARGS="--address={{ ha_cluster_exporter_address | default(mgmt_ip) }}:{{ ha_cluster_exporter_port | default(9664) }}"
+
+# Additional options:
+# --port=9664                    # Port to listen on (default: 9664)
+# --log-level=info               # Log level: debug, info, warn, error
+# --enable-timestamps            # Add timestamps to logs

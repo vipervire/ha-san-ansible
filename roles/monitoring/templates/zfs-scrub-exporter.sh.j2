@@ -1,0 +1,105 @@
+#!/bin/bash
+# Managed by Ansible — ZFS scrub metrics exporter for Prometheus
+# Exports ZFS scrub status as Prometheus textfile collector metrics
+
+set -euo pipefail
+
+POOL_NAME="{{ zfs_pool_name }}"
+TEXTFILE_DIR="/var/lib/prometheus/node-exporter"
+TEXTFILE="${TEXTFILE_DIR}/zfs_scrub.prom"
+TEXTFILE_TMP="${TEXTFILE}.$$"
+
+# Ensure textfile directory exists
+mkdir -p "${TEXTFILE_DIR}"
+
+# Start building metrics
+{
+    echo "# HELP zfs_scrub_last_run_timestamp_seconds Unix timestamp of last scrub completion"
+    echo "# TYPE zfs_scrub_last_run_timestamp_seconds gauge"
+
+    echo "# HELP zfs_scrub_last_run_errors_total Total errors found in last scrub"
+    echo "# TYPE zfs_scrub_last_run_errors_total gauge"
+
+    echo "# HELP zfs_scrub_in_progress Whether a scrub is currently in progress (1=yes, 0=no)"
+    echo "# TYPE zfs_scrub_in_progress gauge"
+
+    echo "# HELP zfs_scrub_pool_imported Whether the pool is imported on this node (1=yes, 0=no)"
+    echo "# TYPE zfs_scrub_pool_imported gauge"
+
+    echo "# HELP zfs_scrub_pool_health Pool health status (0=ONLINE, 1=DEGRADED, 2=FAULTED, 3=UNAVAIL, 4=UNKNOWN)"
+    echo "# TYPE zfs_scrub_pool_health gauge"
+
+    echo "# HELP zfs_scrub_exporter_success Whether the metrics collection succeeded (1=yes, 0=no)"
+    echo "# TYPE zfs_scrub_exporter_success gauge"
+
+    # Check if pool is imported
+    if ! zpool list -H -o name "${POOL_NAME}" &>/dev/null; then
+        # Pool not imported - this node is standby
+        echo "zfs_scrub_pool_imported{pool=\"${POOL_NAME}\"} 0"
+        echo "zfs_scrub_last_run_timestamp_seconds{pool=\"${POOL_NAME}\"} 0"
+        echo "zfs_scrub_last_run_errors_total{pool=\"${POOL_NAME}\"} 0"
+        echo "zfs_scrub_in_progress{pool=\"${POOL_NAME}\"} 0"
+        echo "zfs_scrub_pool_health{pool=\"${POOL_NAME}\"} 4"
+        echo "zfs_scrub_exporter_success 1"
+    else
+        # Pool is imported - this node is active
+        echo "zfs_scrub_pool_imported{pool=\"${POOL_NAME}\"} 1"
+
+        # Get pool status
+        POOL_STATUS=$(zpool status "${POOL_NAME}" 2>/dev/null || echo "")
+
+        if [ -z "${POOL_STATUS}" ]; then
+            echo "zfs_scrub_exporter_success 0"
+            exit 0
+        fi
+
+        # Parse pool health
+        POOL_HEALTH=$(echo "${POOL_STATUS}" | grep "state:" | awk '{print $2}')
+        case "${POOL_HEALTH}" in
+            ONLINE)  HEALTH_CODE=0 ;;
+            DEGRADED) HEALTH_CODE=1 ;;
+            FAULTED) HEALTH_CODE=2 ;;
+            UNAVAIL) HEALTH_CODE=3 ;;
+            *) HEALTH_CODE=4 ;;
+        esac
+        echo "zfs_scrub_pool_health{pool=\"${POOL_NAME}\",state=\"${POOL_HEALTH}\"} ${HEALTH_CODE}"
+
+        # Parse scrub status
+        SCAN_LINE=$(echo "${POOL_STATUS}" | grep "scan:" || echo "")
+
+        # Check if scrub is in progress
+        if echo "${SCAN_LINE}" | grep -q "scrub in progress"; then
+            echo "zfs_scrub_in_progress{pool=\"${POOL_NAME}\"} 1"
+        else
+            echo "zfs_scrub_in_progress{pool=\"${POOL_NAME}\"} 0"
+        fi
+
+        # Extract last scrub date and convert to timestamp
+        # Format: "scan: scrub repaired 0B in 00:45:23 with 0 errors on 2025-01-15 02:00:23"
+        SCRUB_DATE=$(echo "${SCAN_LINE}" | grep -oE "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}" | tail -1 || echo "")
+
+        if [ -n "${SCRUB_DATE}" ]; then
+            SCRUB_TIMESTAMP=$(date -d "${SCRUB_DATE}" +%s 2>/dev/null || echo "0")
+            echo "zfs_scrub_last_run_timestamp_seconds{pool=\"${POOL_NAME}\"} ${SCRUB_TIMESTAMP}"
+        else
+            # No scrub has ever run
+            echo "zfs_scrub_last_run_timestamp_seconds{pool=\"${POOL_NAME}\"} 0"
+        fi
+
+        # Extract error count
+        if echo "${SCAN_LINE}" | grep -q "with [0-9]* errors"; then
+            ERROR_COUNT=$(echo "${SCAN_LINE}" | grep -oE "with [0-9]* errors" | grep -oE "[0-9]+" || echo "0")
+            echo "zfs_scrub_last_run_errors_total{pool=\"${POOL_NAME}\"} ${ERROR_COUNT}"
+        else
+            echo "zfs_scrub_last_run_errors_total{pool=\"${POOL_NAME}\"} 0"
+        fi
+
+        echo "zfs_scrub_exporter_success 1"
+    fi
+} > "${TEXTFILE_TMP}"
+
+# Atomically replace the metrics file
+mv "${TEXTFILE_TMP}" "${TEXTFILE}"
+
+# Set permissions so node_exporter can read it
+chmod 644 "${TEXTFILE}"

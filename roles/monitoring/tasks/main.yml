@@ -11,11 +11,73 @@
     dest: /etc/default/prometheus-node-exporter
     mode: "0644"
     content: |
-      ARGS="--web.listen-address={{ mgmt_ip | default('0.0.0.0') }}:9100"
+      ARGS="--web.listen-address={{ mgmt_ip | default('0.0.0.0') }}:9100 --collector.textfile.directory=/var/lib/prometheus/node-exporter"
   notify: restart node_exporter
+
+- name: Create textfile collector directory
+  ansible.builtin.file:
+    path: /var/lib/prometheus/node-exporter
+    state: directory
+    mode: "0755"
+    owner: prometheus
+    group: prometheus
 
 - name: Enable node_exporter service
   ansible.builtin.systemd:
     name: prometheus-node-exporter
     enabled: true
     state: started
+
+# ─── ZFS Scrub Metrics Exporter ────────────────────────────────────────────
+- name: Deploy ZFS scrub metrics exporter script
+  ansible.builtin.template:
+    src: zfs-scrub-exporter.sh.j2
+    dest: /usr/local/bin/zfs-scrub-exporter
+    mode: "0755"
+  when: zfs_scrub_monitoring_enabled | default(true)
+
+- name: Deploy ZFS scrub exporter systemd service
+  ansible.builtin.template:
+    src: zfs-scrub-exporter.service.j2
+    dest: /etc/systemd/system/zfs-scrub-exporter.service
+    mode: "0644"
+  when: zfs_scrub_monitoring_enabled | default(true)
+  notify: reload systemd
+
+- name: Deploy ZFS scrub exporter systemd timer
+  ansible.builtin.template:
+    src: zfs-scrub-exporter.timer.j2
+    dest: /etc/systemd/system/zfs-scrub-exporter.timer
+    mode: "0644"
+  when: zfs_scrub_monitoring_enabled | default(true)
+  notify: reload systemd
+
+- name: Enable and start ZFS scrub exporter timer
+  ansible.builtin.systemd:
+    name: zfs-scrub-exporter.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: zfs_scrub_monitoring_enabled | default(true)
+
+# ─── HA Cluster Exporter (Pacemaker/Corosync metrics) ──────────────────────
+- name: Install prometheus-hacluster-exporter
+  ansible.builtin.apt:
+    name: prometheus-hacluster-exporter
+    state: present
+  when: ha_cluster_monitoring_enabled | default(true)
+
+- name: Configure ha_cluster_exporter to listen on management VLAN only
+  ansible.builtin.template:
+    src: ha-cluster-exporter-default.j2
+    dest: /etc/default/prometheus-hacluster-exporter
+    mode: "0644"
+  when: ha_cluster_monitoring_enabled | default(true)
+  notify: restart ha_cluster_exporter
+
+- name: Enable and start ha_cluster_exporter service
+  ansible.builtin.systemd:
+    name: prometheus-hacluster-exporter
+    enabled: true
+    state: started
+  when: ha_cluster_monitoring_enabled | default(true)
