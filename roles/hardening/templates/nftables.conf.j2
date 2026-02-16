@@ -42,6 +42,9 @@ table inet filter {
     # Prometheus node_exporter
     ip saddr {{ vlans.management.subnet }} tcp dport 9100 accept
 
+    # Prometheus ha_cluster_exporter (Pacemaker/Corosync metrics)
+    ip saddr {{ vlans.management.subnet }} tcp dport 9664 accept
+
 {% if inventory_hostname in groups['storage_nodes'] %}
     # Corosync on storage VLAN (ring1 redundancy)
     ip saddr {{ vlans.storage.subnet }} udp dport 5405 accept
