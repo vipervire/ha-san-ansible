@@ -40,6 +40,10 @@ vip_smb: "10.30.30.11"
 vip_iscsi: "10.30.30.12"
 vip_cidr: 24
 
+# Management VIP for Cockpit (on management VLAN)
+vip_cockpit: "10.20.20.10"
+vip_mgmt_cidr: 24
+
 # ---------------------------------------------------------------------------
 # Corosync — Aggressive-Safe Tuning
 # ---------------------------------------------------------------------------

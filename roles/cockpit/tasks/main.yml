@@ -10,11 +10,19 @@
       - cockpit-packagekit
     state: present
 
-- name: Enable Cockpit socket
+- name: Enable Cockpit socket (on quorum node only)
   ansible.builtin.systemd:
     name: cockpit.socket
     enabled: true
     state: started
+  when: inventory_hostname not in groups['storage_nodes']
+
+- name: Disable Cockpit auto-start on storage nodes (Pacemaker manages this)
+  ansible.builtin.systemd:
+    name: cockpit.socket
+    enabled: false
+    state: stopped
+  when: inventory_hostname in groups['storage_nodes']
 
 # ─── 45Drives Houston plugins ─────────────────────────────────────────────
 # These are optional — install from 45Drives repo or GitHub releases.

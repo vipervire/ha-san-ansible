@@ -15,12 +15,64 @@
     name: nfs-kernel-server
     enabled: false
 
-- name: Deploy /etc/exports
+# ─── Shared cluster configuration directory ───────────────────────────────
+- name: Create cluster config directory on shared pool
+  ansible.builtin.file:
+    path: "/{{ zfs_pool_name }}/cluster-config"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  when: >
+    ansible_mounts | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0
+  ignore_errors: true
+
+- name: Create NFS config directory
+  ansible.builtin.file:
+    path: "/{{ zfs_pool_name }}/cluster-config/nfs"
+    state: directory
+    mode: "0755"
+  when: >
+    ansible_mounts | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0
+  ignore_errors: true
+
+- name: Create Samba config directory
+  ansible.builtin.file:
+    path: "/{{ zfs_pool_name }}/cluster-config/samba"
+    state: directory
+    mode: "0755"
+  when: >
+    ansible_mounts | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0
+  ignore_errors: true
+
+- name: Initialize exports on shared storage (if not exists)
   ansible.builtin.template:
     src: exports.j2
-    dest: /etc/exports
+    dest: "/{{ zfs_pool_name }}/cluster-config/nfs/exports"
     mode: "0644"
-  notify: reload nfs exports
+    force: false
+  when: >
+    ansible_mounts | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0
+  ignore_errors: true
+  run_once: true
+
+- name: Remove existing exports file (if regular file)
+  ansible.builtin.stat:
+    path: /etc/exports
+  register: exports_stat
+
+- name: Remove old exports if it's a regular file
+  ansible.builtin.file:
+    path: /etc/exports
+    state: absent
+  when: exports_stat.stat.exists and not exports_stat.stat.islnk
+
+- name: Symlink exports from shared storage
+  ansible.builtin.file:
+    src: "/{{ zfs_pool_name }}/cluster-config/nfs/exports"
+    dest: /etc/exports
+    state: link
+    force: true
 
 - name: Deploy /etc/nfs.conf
   ansible.builtin.template:
@@ -44,9 +96,58 @@
     - smbd
     - nmbd
 
-- name: Deploy smb.conf
+- name: Initialize smb.conf on shared storage (if not exists)
   ansible.builtin.template:
     src: smb.conf.j2
+    dest: "/{{ zfs_pool_name }}/cluster-config/samba/smb.conf"
+    mode: "0644"
+    force: false
+  when: >
+    ansible_mounts | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0
+  ignore_errors: true
+  run_once: true
+
+- name: Create Samba private directory on shared storage
+  ansible.builtin.file:
+    path: "/{{ zfs_pool_name }}/cluster-config/samba/private"
+    state: directory
+    mode: "0700"
+  when: >
+    ansible_mounts | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0
+  ignore_errors: true
+
+- name: Remove existing smb.conf (if regular file)
+  ansible.builtin.stat:
+    path: /etc/samba/smb.conf
+  register: smb_conf_stat
+
+- name: Remove old smb.conf if it's a regular file
+  ansible.builtin.file:
+    path: /etc/samba/smb.conf
+    state: absent
+  when: smb_conf_stat.stat.exists and not smb_conf_stat.stat.islnk
+
+- name: Symlink smb.conf from shared storage
+  ansible.builtin.file:
+    src: "/{{ zfs_pool_name }}/cluster-config/samba/smb.conf"
     dest: /etc/samba/smb.conf
-    mode: "0640"
-  notify: validate smb config
+    state: link
+    force: true
+
+- name: Remove existing Samba private directory (if regular directory)
+  ansible.builtin.stat:
+    path: /var/lib/samba/private
+  register: samba_private_stat
+
+- name: Remove old Samba private directory if it's a regular directory
+  ansible.builtin.file:
+    path: /var/lib/samba/private
+    state: absent
+  when: samba_private_stat.stat.exists and not samba_private_stat.stat.islnk
+
+- name: Symlink Samba private directory from shared storage
+  ansible.builtin.file:
+    src: "/{{ zfs_pool_name }}/cluster-config/samba/private"
+    dest: /var/lib/samba/private
+    state: link
+    force: true

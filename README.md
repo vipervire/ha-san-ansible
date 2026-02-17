@@ -166,6 +166,26 @@ journalctl -u zfs-scrub@san-pool.service -f
 zpool status san-pool
 ```
 
+## Cockpit Web Interface
+
+Access Cockpit at:
+- **Active node VIP:** `https://10.20.20.10:9090` (recommended)
+- Direct node access: `https://10.20.20.1:9090` (storage-a) or `https://10.20.20.2:9090` (storage-b)
+
+**Features:**
+- 45Drives Houston plugins for ZFS, NFS, SMB management
+- File browser (cockpit-navigator)
+- User/group management (cockpit-identities)
+- System monitoring
+
+**Configuration sync:**
+- NFS exports: `/etc/exports` → symlinked to `/san-pool/cluster-config/nfs/exports`
+- SMB config: `/etc/samba/smb.conf` → symlinked to `/san-pool/cluster-config/samba/smb.conf`
+- Samba users: `/var/lib/samba/private/` → symlinked to `/san-pool/cluster-config/samba/private/`
+- Changes via Cockpit automatically sync between nodes during failover ✅
+
+**Documentation:** See `docs/cockpit-ha-config.md` for detailed HA configuration guide, troubleshooting, and verification steps.
+
 ## Customization Points
 
 - **Disk layout**: Edit `local_data_disks` in `host_vars/` for your drives

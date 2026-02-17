@@ -57,7 +57,25 @@ When modifying STONITH/fencing configuration:
 
 **Supported methods:** ipmi, kasa, tasmota, esphome, http
 
-### 3. Monitoring Changes
+### 3. Cockpit HA Configuration
+
+When modifying Cockpit, NFS, or SMB configurations:
+
+- **Important:** Config files are symlinked to shared storage for automatic sync during failover
+- **Symlinked paths:**
+  - `/etc/exports` → `/san-pool/cluster-config/nfs/exports`
+  - `/etc/samba/smb.conf` → `/san-pool/cluster-config/samba/smb.conf`
+  - `/var/lib/samba/private/` → `/san-pool/cluster-config/samba/private/`
+- **Cockpit VIP:** 10.20.20.10 (management VLAN) follows active node
+- **Managed by Pacemaker:** Cockpit service is part of san-resources group
+- **Documentation:** `docs/cockpit-ha-config.md` for detailed configuration and troubleshooting
+
+**When editing NFS/SMB configs manually:**
+- Always edit the shared storage location, not the symlink target
+- Example: `vim /san-pool/cluster-config/nfs/exports` (correct)
+- NOT: `vim /etc/exports` (will work but less obvious it's on shared storage)
+
+### 4. Monitoring Changes
 
 When adding new metrics or exporters:
 
@@ -67,7 +85,7 @@ When adding new metrics or exporters:
 - **Test metrics:** Verify metrics are accessible from Prometheus server
 - **Update README:** Add to "Monitoring and Alerting" section
 
-### 4. Per-Node vs. Global Configuration
+### 5. Per-Node vs. Global Configuration
 
 **Per-node settings** (in `host_vars/<hostname>.yml`):
 - Disk layouts (`local_data_disks`)
@@ -81,7 +99,7 @@ When adding new metrics or exporters:
 - Cluster settings
 - STONITH configuration (now per-node in stonith_nodes dict)
 
-### 5. Idempotency
+### 6. Idempotency
 
 Always ensure tasks are idempotent:
 
@@ -99,7 +117,7 @@ Always ensure tasks are idempotent:
   failed_when: result.rc != 0 and 'already exists' not in result.stderr
 ```
 
-### 6. Secrets Management
+### 7. Secrets Management
 
 **Never commit plain text secrets!**
 
@@ -139,6 +157,7 @@ hacluster_password: !vault |
 │   └── cockpit/          # 45Drives Houston + Cockpit
 └── docs/
     ├── cluster-monitoring.md    # HA cluster monitoring guide
+    ├── cockpit-ha-config.md     # Cockpit HA configuration guide
     ├── stonith-smart-plugs.md   # Smart plug fencing guide
     ├── stonith-migration.md     # Migration guide for STONITH config
     ├── ntfy-integration.md      # Prometheus + NTFY alerting
@@ -284,6 +303,7 @@ zpool status san-pool  # On storage-b
 
 ## Change Log
 
+- **2025-02-16**: Added Cockpit HA configuration (VIP + shared storage config sync)
 - **2025-02-16**: Added mixed STONITH configuration support (per-node methods)
 - **2025-02-16**: Added comprehensive monitoring (ZFS scrubs, cluster health)
 - **2025-02-16**: Added ESPHome smart plug support for STONITH
