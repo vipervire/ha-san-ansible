@@ -16,7 +16,9 @@
     name:
       - python3-kasa
     state: present
-  when: stonith_method == 'smart_plug' and stonith_smart_plug_type == 'kasa'
+  when: >
+    stonith_nodes is defined and
+    stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0
 
 - name: Set hacluster user password
   ansible.builtin.user:

@@ -128,44 +128,69 @@ smb_shares:
 # ---------------------------------------------------------------------------
 # STONITH fencing
 # ---------------------------------------------------------------------------
-# Choose your fencing method. Uncomment the one you're using.
+# Per-node STONITH configuration supporting mixed fencing methods
 
-# Option A: IPMI (preferred if BMC is available)
-# stonith_method: "ipmi"
-# stonith_ipmi:
-#   storage-a:
-#     ip: "10.20.20.101"   # BMC IP for storage-a
-#     user: "bmcadmin"
-#     password: "CHANGEME-vault-this"
-#   storage-b:
-#     ip: "10.20.20.102"   # BMC IP for storage-b
-#     user: "bmcadmin"
-#     password: "CHANGEME-vault-this"
-
-# Option B: Smart plugs (kasa, esphome, tasmota, or generic http)
-stonith_method: "smart_plug"
-stonith_smart_plug_type: "kasa"  # Options: kasa, esphome, tasmota, http
-stonith_smart_plug:
+stonith_nodes:
   storage-a:
-    ip: "10.20.20.201"   # Smart plug controlling storage-a
-    # For kasa: no credentials needed (local protocol)
-    # For esphome/tasmota: optionally add user/password/switch_name
-  storage-b:
-    ip: "10.20.20.202"   # Smart plug controlling storage-b
+    method: "ipmi"           # Options: ipmi, kasa, tasmota, esphome, http
+    ip: "10.20.20.101"       # BMC IP or smart plug IP
+    user: "bmcadmin"         # IPMI user
+    password: "CHANGEME-vault-this"  # IPMI password (vault this!)
 
-# ESPHome example (uncomment and modify if using ESPHome):
-# stonith_smart_plug_type: "esphome"
-# stonith_smart_plug:
+  storage-b:
+    method: "kasa"           # TP-Link Kasa smart plug
+    ip: "10.20.20.202"       # Smart plug IP on management VLAN
+    # No credentials needed for Kasa local protocol
+
+# ───────────────────────────────────────────────────────────────────────────
+# Example configurations for other methods:
+# ───────────────────────────────────────────────────────────────────────────
+
+# Example: Both nodes using IPMI
+# stonith_nodes:
 #   storage-a:
-#     ip: "10.20.20.201"
-#     switch_name: "relay"       # Must match ESPHome switch ID
-#     user: "admin"              # optional if web auth enabled
-#     password: "your-password"  # optional if web auth enabled
+#     method: "ipmi"
+#     ip: "10.20.20.101"
+#     user: "admin"
+#     password: "secret"
 #   storage-b:
+#     method: "ipmi"
+#     ip: "10.20.20.102"
+#     user: "admin"
+#     password: "secret"
+
+# Example: Both nodes using smart plugs
+# stonith_nodes:
+#   storage-a:
+#     method: "kasa"
+#     ip: "10.20.20.201"
+#   storage-b:
+#     method: "esphome"
 #     ip: "10.20.20.202"
 #     switch_name: "relay"
 #     user: "admin"
-#     password: "your-password"
+#     password: "plugsecret"
+
+# Example: Tasmota smart plug
+# stonith_nodes:
+#   storage-a:
+#     method: "tasmota"
+#     ip: "10.20.20.201"
+#     user: "admin"          # optional
+#     password: "secret"     # optional
+
+# Example: Generic HTTP-controlled device
+# stonith_nodes:
+#   storage-a:
+#     method: "http"
+#     ip: "10.20.20.201"
+#     user: "admin"
+#     password: "secret"
+#     power_off_url: "/api/power/off"
+#     power_on_url: "/api/power/on"
+#     status_url: "/api/status"
+#     status_on_regex: "powered.*on"
+#     status_off_regex: "powered.*off"
 
 # ---------------------------------------------------------------------------
 # Pacemaker resource configuration

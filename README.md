@@ -170,8 +170,10 @@ zpool status san-pool
 
 - **Disk layout**: Edit `local_data_disks` in `host_vars/` for your drives
 - **VLANs/subnets**: Edit `vlans` dict in `group_vars/all.yml`
-- **STONITH method**: Switch between `ipmi` and `smart_plug` in `storage_nodes.yml`
+- **STONITH method**: Configure per-node in `stonith_nodes` dict in `storage_nodes.yml`
+  - Supports mixed methods: storage-a can use IPMI while storage-b uses smart plug
   - Smart plug guide: `docs/stonith-smart-plugs.md` (TP-Link Kasa, ESPHome, Tasmota)
+  - Migration guide: `docs/stonith-migration.md` (upgrading from old config format)
 - **Snapshot policy**: Edit `sanoid_templates` in `storage_nodes.yml`
 - **ZFS scrub schedule**: Edit `zfs_scrub_schedule` in `storage_nodes.yml` (default: monthly on 1st at 2 AM)
   - Use systemd OnCalendar syntax: `"*-*-01 02:00:00"` = 1st of month at 2am

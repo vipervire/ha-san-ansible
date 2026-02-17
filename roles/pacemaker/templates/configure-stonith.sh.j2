@@ -6,92 +6,94 @@ set -euo pipefail
 
 echo "=== Configuring STONITH fencing ==="
 
-{% if stonith_method == 'ipmi' %}
-# ─── IPMI Fencing ───────────────────────────────────────────────────────────
-{% for node, cfg in stonith_ipmi.items() %}
-echo "Creating IPMI fence agent for {{ node }}"
-pcs stonith create fence-{{ node }} fence_ipmilan \
-  ipaddr="{{ cfg.ip }}" \
-  login="{{ cfg.user }}" \
-  passwd="{{ cfg.password }}" \
+{% for node_name, node_cfg in stonith_nodes.items() %}
+{% if node_cfg.method == 'ipmi' %}
+# ─── IPMI Fencing for {{ node_name }} ─────────────────────────────────────
+echo "Creating IPMI fence agent for {{ node_name }}"
+pcs stonith create fence-{{ node_name }} fence_ipmilan \
+  ipaddr="{{ node_cfg.ip }}" \
+  login="{{ node_cfg.user }}" \
+  passwd="{{ node_cfg.password }}" \
   lanplus=1 \
-  pcmk_host_list="{{ node }}" \
+  pcmk_host_list="{{ node_name }}" \
   pcmk_reboot_timeout=30 \
   power_timeout=20 \
   op monitor interval=60s 2>/dev/null || \
-  echo "  (fence-{{ node }} may already exist)"
-{% endfor %}
+  echo "  (fence-{{ node_name }} may already exist)"
 
-{% elif stonith_method == 'smart_plug' %}
-# ─── Smart Plug Fencing ────────────────────────────────────────────────────
-{% if stonith_smart_plug_type == 'kasa' %}
-# TP-Link Kasa plugs via fence_kasa (requires python3-kasa package)
-{% for node, cfg in stonith_smart_plug.items() %}
-echo "Creating TP-Link Kasa fence agent for {{ node }}"
-pcs stonith create fence-{{ node }} fence_kasa \
-  ip="{{ cfg.ip }}" \
-  pcmk_host_list="{{ node }}" \
+{% elif node_cfg.method == 'kasa' %}
+# ─── TP-Link Kasa Fencing for {{ node_name }} ────────────────────────────
+echo "Creating TP-Link Kasa fence agent for {{ node_name }}"
+pcs stonith create fence-{{ node_name }} fence_kasa \
+  ip="{{ node_cfg.ip }}" \
+  pcmk_host_list="{{ node_name }}" \
   pcmk_reboot_action="off" \
   pcmk_off_timeout="30s" \
   pcmk_on_timeout="30s" \
   op monitor interval=60s 2>/dev/null || \
-  echo "  (fence-{{ node }} may already exist)"
-{% endfor %}
+  echo "  (fence-{{ node_name }} may already exist)"
 
-{% elif stonith_smart_plug_type == 'tasmota' %}
-# Tasmota-flashed plugs via fence_http (custom power commands)
-{% for node, cfg in stonith_smart_plug.items() %}
-echo "Creating Tasmota fence agent for {{ node }}"
-pcs stonith create fence-{{ node }} fence_http \
-  ip="{{ cfg.ip }}" \
-  username="{{ cfg.user | default('admin') }}" \
-  password="{{ cfg.password | default('') }}" \
+{% elif node_cfg.method == 'tasmota' %}
+# ─── Tasmota Fencing for {{ node_name }} ─────────────────────────────────
+echo "Creating Tasmota fence agent for {{ node_name }}"
+pcs stonith create fence-{{ node_name }} fence_http \
+  ip="{{ node_cfg.ip }}" \
+  username="{{ node_cfg.user | default('admin') }}" \
+  password="{{ node_cfg.password | default('') }}" \
   power_off_url="/cm?cmnd=Power%20OFF" \
   power_on_url="/cm?cmnd=Power%20ON" \
   status_url="/cm?cmnd=Power" \
   status_on_regex="ON" \
   status_off_regex="OFF" \
-  pcmk_host_list="{{ node }}" \
+  pcmk_host_list="{{ node_name }}" \
   op monitor interval=60s 2>/dev/null || \
-  echo "  (fence-{{ node }} may already exist)"
-{% endfor %}
+  echo "  (fence-{{ node_name }} may already exist)"
 
-{% elif stonith_smart_plug_type == 'esphome' %}
-# ESPHome-flashed plugs via fence_http (HTTP REST API)
-{% for node, cfg in stonith_smart_plug.items() %}
-echo "Creating ESPHome fence agent for {{ node }}"
-pcs stonith create fence-{{ node }} fence_http \
-  ip="{{ cfg.ip }}" \
-  username="{{ cfg.user | default('') }}" \
-  password="{{ cfg.password | default('') }}" \
-  power_off_url="/switch/{{ cfg.switch_name | default('relay') }}/turn_off" \
-  power_on_url="/switch/{{ cfg.switch_name | default('relay') }}/turn_on" \
-  status_url="/switch/{{ cfg.switch_name | default('relay') }}" \
+{% elif node_cfg.method == 'esphome' %}
+# ─── ESPHome Fencing for {{ node_name }} ─────────────────────────────────
+echo "Creating ESPHome fence agent for {{ node_name }}"
+pcs stonith create fence-{{ node_name }} fence_http \
+  ip="{{ node_cfg.ip }}" \
+  username="{{ node_cfg.user | default('') }}" \
+  password="{{ node_cfg.password | default('') }}" \
+  power_off_url="/switch/{{ node_cfg.switch_name | default('relay') }}/turn_off" \
+  power_on_url="/switch/{{ node_cfg.switch_name | default('relay') }}/turn_on" \
+  status_url="/switch/{{ node_cfg.switch_name | default('relay') }}" \
   status_on_regex='"state":"ON"' \
   status_off_regex='"state":"OFF"' \
-  pcmk_host_list="{{ node }}" \
+  pcmk_host_list="{{ node_name }}" \
   op monitor interval=60s 2>/dev/null || \
-  echo "  (fence-{{ node }} may already exist)"
-{% endfor %}
+  echo "  (fence-{{ node_name }} may already exist)"
+
+{% elif node_cfg.method == 'http' %}
+# ─── Generic HTTP Fencing for {{ node_name }} ────────────────────────────
+echo "Creating HTTP fence agent for {{ node_name }}"
+pcs stonith create fence-{{ node_name }} fence_http \
+  ip="{{ node_cfg.ip }}" \
+  username="{{ node_cfg.user }}" \
+  password="{{ node_cfg.password }}" \
+  power_off_url="{{ node_cfg.power_off_url }}" \
+  power_on_url="{{ node_cfg.power_on_url }}" \
+  status_url="{{ node_cfg.status_url }}" \
+  status_on_regex="{{ node_cfg.status_on_regex | default('ON') }}" \
+  status_off_regex="{{ node_cfg.status_off_regex | default('OFF') }}" \
+  pcmk_host_list="{{ node_name }}" \
+  op monitor interval=60s 2>/dev/null || \
+  echo "  (fence-{{ node_name }} may already exist)"
 
 {% else %}
-# Generic HTTP-based smart plug
-{% for node, cfg in stonith_smart_plug.items() %}
-echo "Creating HTTP fence agent for {{ node }}"
-pcs stonith create fence-{{ node }} fence_http \
-  ip="{{ cfg.ip }}" \
-  username="{{ cfg.user }}" \
-  password="{{ cfg.password }}" \
-  pcmk_host_list="{{ node }}" \
-  op monitor interval=60s 2>/dev/null || \
-  echo "  (fence-{{ node }} may already exist)"
+# ─── Unknown method for {{ node_name }}: {{ node_cfg.method }} ───────────
+echo "WARNING: Unknown STONITH method '{{ node_cfg.method }}' for {{ node_name }}"
+echo "         Skipping fence agent creation for this node."
+echo "         Valid methods: ipmi, kasa, tasmota, esphome, http"
+
+{% endif %}
 {% endfor %}
-{% endif %}
-{% endif %}
 
 # Prevent STONITH resources from running on quorum node
-pcs constraint location fence-storage-a avoids quorum=INFINITY 2>/dev/null || true
-pcs constraint location fence-storage-b avoids quorum=INFINITY 2>/dev/null || true
+{% for node_name in stonith_nodes.keys() %}
+pcs constraint location fence-{{ node_name }} avoids quorum=INFINITY 2>/dev/null || true
+{% endfor %}
 
 echo "=== STONITH configuration complete ==="
 echo "Test with: pcs stonith fence storage-b  (BE CAREFUL — this WILL power off the node)"

@@ -12,6 +12,42 @@ This guide covers setting up smart plug-based fencing for your HA cluster when I
 - ⚠️ Consumer-grade reliability (not enterprise-rated)
 - ⚠️ Requires manual fence agent installation in some cases
 
+## Mixed STONITH Configurations
+
+The playbook now supports **mixed fencing methods** where different nodes can use different STONITH mechanisms. This is useful when:
+- Some servers have IPMI/BMC, others don't
+- Migrating from one fencing method to another
+- Budget allows IPMI for one node, smart plug for the other
+- Testing different fencing technologies
+
+### Configuration Example
+
+```yaml
+# In group_vars/storage_nodes.yml
+stonith_nodes:
+  storage-a:
+    method: "ipmi"           # Enterprise server with BMC
+    ip: "10.20.20.101"
+    user: "bmcadmin"
+    password: "CHANGEME"
+
+  storage-b:
+    method: "kasa"           # Consumer server with smart plug
+    ip: "10.20.20.202"
+```
+
+The playbook will automatically:
+- Install necessary fence agent dependencies (python3-kasa if any node uses Kasa)
+- Generate correct `pcs stonith create` commands per node
+- Configure firewall rules for all required protocols
+
+**More examples:**
+- Both IPMI: Set both nodes to `method: "ipmi"`
+- Both smart plugs: Mix `kasa`, `esphome`, `tasmota` as needed
+- Three nodes: Add third node with any method
+
+See `docs/stonith-migration.md` for migrating from the old configuration format.
+
 ## Recommended Options
 
 ### Option 1: TP-Link Kasa HS105 (Easiest)
