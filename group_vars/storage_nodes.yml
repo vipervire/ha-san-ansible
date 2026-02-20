@@ -20,7 +20,7 @@ zfs_pool_ashift: 12
 zfs_pool_options:
   multihost: "on"
   autotrim: "on"
-  autoreplace: "on"    # Auto-resilver when faulted device (iSCSI LUN) reconnects after recovery
+autoreplace: "on"    # Auto-replace when a new physical disk appears in a faulted vdev's slot (iSCSI reconnect resilvering is handled by ZED auto-online, not this)
 zfs_dataset_options:
   acltype: posixacl
   compression: lz4
