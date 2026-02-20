@@ -20,6 +20,7 @@ zfs_pool_ashift: 12
 zfs_pool_options:
   multihost: "on"
   autotrim: "on"
+  autoreplace: "on"    # Auto-resilver when faulted device (iSCSI LUN) reconnects after recovery
 zfs_dataset_options:
   acltype: posixacl
   compression: lz4
@@ -39,6 +40,7 @@ zfs_modprobe_options:
   zfs_txg_timeout: 30           # Default: reduces write latency stalls; sync writes unaffected
   zfs_resilver_min_time_ms: 27000   # 27s minimum ensures steady drive recovery (OpenZFS recommended)
   zfs_resilver_delay: 0
+  zfs_nocacheflush: 1           # Safe: all data and SLOG devices are enterprise SSDs with hardware PLP
 
 # ZFS scrub automation
 zfs_scrub_enabled: true
