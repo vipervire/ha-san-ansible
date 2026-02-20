@@ -185,10 +185,10 @@ https://10.20.20.10:9090
 # Verify export was written to shared storage
 ssh storage-a "cat /san-pool/cluster-config/nfs/exports | grep test-share"
 
-# Perform planned failover
-ssh storage-a "pcs resource move san-resources storage-b"
+# Perform planned failover — put active node in standby (resources migrate automatically)
+ssh storage-a "pcs node standby storage-a"
 
-# Wait for failover to complete
+# Wait for failover to complete (~5-8s)
 pcs status
 
 # Verify VIP moved
@@ -201,8 +201,8 @@ ssh storage-b "cat /san-pool/cluster-config/nfs/exports | grep test-share"
 https://10.20.20.10:9090
 # Should show same test-share
 
-# Clear move constraint
-ssh storage-b "pcs resource clear san-resources"
+# Return storage-a to service when ready
+ssh storage-a "pcs node unstandby storage-a"
 ```
 
 ### Test Samba User Sync
@@ -220,7 +220,7 @@ sudo pdbedit -L -d 0
 sudo ls -la /san-pool/cluster-config/samba/private/
 
 # Perform failover
-pcs resource move san-resources storage-b
+pcs node standby storage-a
 
 # After failover, verify user still exists
 ssh storage-b "sudo pdbedit -L"

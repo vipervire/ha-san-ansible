@@ -22,7 +22,7 @@ table inet filter {
     ip saddr {{ vlans.storage.subnet }} tcp dport 3260 accept
 
     # ─── Client VLAN ({{ vlans.client.id }}) — NFS, SMB, iSCSI ─────────
-    ip saddr {{ vlans.client.subnet }} tcp dport { 2049, 445, 3260, 111 } accept
+    ip saddr {{ vlans.client.subnet }} tcp dport { 2049, 20048, 445, 3260, 111 } accept
     ip saddr {{ vlans.client.subnet }} udp dport 111 accept
 {% endif %}
 

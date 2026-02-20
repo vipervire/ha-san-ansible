@@ -1,0 +1,17 @@
+# Managed by Ansible — reboot-required metrics exporter service
+[Unit]
+Description=Reboot-required metrics exporter for Prometheus
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/reboot-required-exporter
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=reboot-required-exporter
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/prometheus/node-exporter

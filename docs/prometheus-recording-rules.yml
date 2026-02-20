@@ -1,0 +1,42 @@
+# Prometheus Recording Rules for HA SAN
+#
+# Add to prometheus.yml:
+#   rule_files:
+#     - "rules/prometheus-recording-rules.yml"
+#
+# These pre-compute frequently-used expressions to reduce query cost
+# and enable faster dashboard rendering.
+
+groups:
+  - name: zfs_recording_rules
+    interval: 60s
+    rules:
+      - record: zfs:pool:utilization_ratio
+        expr: zfs_pool_allocated_bytes / zfs_pool_size_bytes
+
+      - record: zfs:pool:free_ratio
+        expr: zfs_pool_free_bytes / zfs_pool_size_bytes
+
+      - record: zfs:vdev:total_errors
+        expr: zfs_vdev_read_errors + zfs_vdev_write_errors + zfs_vdev_cksum_errors
+
+      - record: zfs:scrub:age_hours
+        expr: (time() - zfs_scrub_last_run_timestamp_seconds) / 3600
+
+      - record: zfs:dataset:snapshot_age_hours
+        expr: (time() - zfs_dataset_last_snapshot_seconds) / 3600
+
+  - name: ha_cluster_recording_rules
+    interval: 60s
+    rules:
+      - record: ha_cluster:resources:running_count
+        expr: count by (cluster) (ha_cluster_pacemaker_resources{status="started"})
+
+      - record: ha_cluster:failovers:per_hour
+        expr: changes(ha_cluster_pacemaker_location_constraints[1h])
+
+      - record: ha_cluster:stonith:agents_reachable
+        expr: count by (instance) (stonith_agent_reachable == 1)
+
+      - record: ha_cluster:stonith:agents_unreachable
+        expr: count by (instance) (stonith_agent_reachable == 0)

@@ -27,15 +27,17 @@ zfs_dataset_options:
   xattr: sa
   atime: "off"
 
-# ARC limit in bytes (8 GB) — leave RAM for services
-zfs_arc_max: 8589934592
+# ARC limit — dynamically calculated at deploy time as 50% of total RAM.
+# Override per-host in host_vars/<node>.yml if a specific value is needed:
+#   zfs_arc_max: 17179869184  # 16GB — explicit per-host override
+# The _zfs_arc_max fact is computed in roles/zfs/tasks/main.yml at runtime.
 
 # ZFS module tunables written to /etc/modprobe.d/zfs.conf
+# NOTE: zfs_arc_max is not listed here — it is injected dynamically by the zfs role
 zfs_modprobe_options:
-  zfs_arc_max: "{{ zfs_arc_max }}"
   zfs_vdev_scheduler: "none"
-  zfs_txg_timeout: 5
-  zfs_resilver_min_time_ms: 5000
+  zfs_txg_timeout: 30           # Default: reduces write latency stalls; sync writes unaffected
+  zfs_resilver_min_time_ms: 27000   # 27s minimum ensures steady drive recovery (OpenZFS recommended)
   zfs_resilver_delay: 0
 
 # ZFS scrub automation
@@ -76,11 +78,18 @@ iscsi_chap_enabled: true
 iscsi_chap_user: "iscsi-repl-user"
 iscsi_chap_password: "CHANGEME-vault-this"  # ansible-vault in production
 
+# Mutual CHAP: initiator verifies the target knows this credential (bidirectional auth)
+# When enabled, the target presents these credentials back to the initiator.
+# Both nodes share the same mutual CHAP credential (symmetric design).
+iscsi_mutual_chap_enabled: true
+iscsi_mutual_chap_user: "iscsi-target-user"
+iscsi_mutual_chap_password: "CHANGEME-vault-this"  # ansible-vault in production — MUST differ from iscsi_chap_password
+
 # open-iscsi initiator aggressive-safe timeouts
 iscsi_replacement_timeout: 5
 iscsi_noop_out_interval: 2
 iscsi_noop_out_timeout: 2
-iscsi_login_timeout: 15
+iscsi_login_timeout: 10       # Reduced: replacement_timeout (5s) handles path failures; this covers initial login
 
 # ---------------------------------------------------------------------------
 # iSCSI — Client-facing target (Pacemaker-managed)
@@ -197,6 +206,10 @@ stonith_nodes:
 # ---------------------------------------------------------------------------
 pacemaker_resource_stickiness: 200
 pacemaker_preferred_node: "storage-a"  # soft preference, not hard pin
+
+# Seconds to wait after 'pcs node standby' during shutdown for resources to migrate
+# before pacemaker itself stops. Planned migration takes ~5-8s; 15s is conservative.
+pacemaker_standby_drain_seconds: 15
 
 # ---------------------------------------------------------------------------
 # Sanoid snapshot policy

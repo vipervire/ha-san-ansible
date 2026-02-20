@@ -21,42 +21,58 @@ iscsi_peer_ip: "10.10.10.2"
 iscsi_peer_iqn: "{{ iscsi_iqn_prefix }}:storage-b"
 
 # ---------------------------------------------------------------------------
-# Local disks — adjust device paths to match your hardware
+# Local disks — MUST use persistent /dev/disk/by-id/ paths
 # ---------------------------------------------------------------------------
-# These are the raw block devices to export via LIO and use in the ZFS pool.
-# Use `lsblk` or `ls /dev/disk/by-id/` to identify them.
+# /dev/sdX paths are NOT stable — they reorder on reboot, drive replacement,
+# or BIOS update and will cause pool creation to target wrong disks.
+#
+# To find by-id paths on this node:
+#   ls -la /dev/disk/by-id/ | grep -v part | grep -v wwn
+#   Use ata-*, scsi-*, or nvme-* identifiers (NOT wwn — those are hardware-specific)
+#
+# Example output:
+#   ata-WDC_WD100EFAX-68LHPN0_XXXXXXXX -> ../../sda
+#   ata-WDC_WD100EFAX-68LHPN0_YYYYYYYY -> ../../sdb
+#
+# Symmetric active/passive HA design:
+# Each node exports its local disks via LIO iSCSI target AND connects to the peer's target.
+# ZFS pool mirrors own local disks (physical) with peer's disks (iSCSI).
+# Either node can be active primary. On failover, the surviving node imports the pool
+# in degraded state (local disks only) and continues serving until the peer is restored.
+# Pool re-silvering restores full redundancy once the peer reconnects.
 
 local_data_disks:
-  - device: /dev/sda
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_0
     label: "data-a-0"
-  - device: /dev/sdb
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_1
     label: "data-a-1"
-  - device: /dev/sdc
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_2
     label: "data-a-2"
-  - device: /dev/sdd
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_3
     label: "data-a-3"
-  - device: /dev/sde
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_4
     label: "data-a-4"
-  - device: /dev/sdf
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_5
     label: "data-a-5"
-  - device: /dev/sdg
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_6
     label: "data-a-6"
-  - device: /dev/sdh
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_7
     label: "data-a-7"
-  - device: /dev/sdi
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_8
     label: "data-a-8"
-  - device: /dev/sdj
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_9
     label: "data-a-9"
-  - device: /dev/sdk
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_10
     label: "data-a-10"
-  - device: /dev/sdl
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_11
     label: "data-a-11"
 
-# Optional: SLOG and special vdev disks (Samsung SV843 or similar)
-# Uncomment if you have dedicated devices for these.
+# Optional: SLOG and special vdev disks (NVMe recommended for SLOG)
+# SLOG accelerates sync writes (NFS sync, database commits) significantly.
+# Uncomment and replace placeholders if you have dedicated NVMe devices.
 # slog_disk:
-#   device: /dev/sdm
+#   device: /dev/disk/by-id/nvme-PLACEHOLDER_NVME_A
 #   label: "slog-a"
 # special_disk:
-#   device: /dev/sdn
+#   device: /dev/disk/by-id/nvme-PLACEHOLDER_SPECIAL_A
 #   label: "special-a"

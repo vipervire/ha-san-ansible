@@ -25,19 +25,27 @@
   when: inventory_hostname in groups['storage_nodes']
 
 # ─── 45Drives Houston plugins ─────────────────────────────────────────────
-# These are optional — install from 45Drives repo or GitHub releases.
+# These are optional — install from 45Drives repo.
+# Uses explicit apt key + repo rather than curl|bash to avoid supply chain risk.
 
-- name: Add 45Drives repo key and source
-  ansible.builtin.shell: |
-    curl -sSL https://repo.45drives.com/setup | bash
-  args:
-    creates: /etc/apt/sources.list.d/45drives.list
-  register: repo_added
+- name: Add 45Drives GPG signing key
+  ansible.builtin.get_url:
+    url: https://repo.45drives.com/key/gpg
+    dest: /usr/share/keyrings/45drives-archive-keyring.gpg
+    mode: "0644"
+  register: key_download
+
+- name: Add 45Drives apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/45drives-archive-keyring.gpg] https://repo.45drives.com/debian focal main"
+    state: present
+    filename: 45drives
+  when: key_download is succeeded
 
 - name: Update apt cache after adding 45Drives repo
   ansible.builtin.apt:
     update_cache: true
-  when: repo_added.changed
+  when: key_download.changed
 
 - name: Install 45Drives Houston Cockpit plugins
   ansible.builtin.apt:

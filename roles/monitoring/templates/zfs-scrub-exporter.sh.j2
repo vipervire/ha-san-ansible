@@ -32,6 +32,36 @@ mkdir -p "${TEXTFILE_DIR}"
     echo "# HELP zfs_scrub_exporter_success Whether the metrics collection succeeded (1=yes, 0=no)"
     echo "# TYPE zfs_scrub_exporter_success gauge"
 
+    echo "# HELP zfs_pool_size_bytes Total pool size in bytes"
+    echo "# TYPE zfs_pool_size_bytes gauge"
+
+    echo "# HELP zfs_pool_allocated_bytes Pool space currently in use"
+    echo "# TYPE zfs_pool_allocated_bytes gauge"
+
+    echo "# HELP zfs_pool_free_bytes Pool space available"
+    echo "# TYPE zfs_pool_free_bytes gauge"
+
+    echo "# HELP zfs_pool_fragmentation_percent Pool fragmentation percentage"
+    echo "# TYPE zfs_pool_fragmentation_percent gauge"
+
+    echo "# HELP zfs_vdev_read_errors Read errors per vdev"
+    echo "# TYPE zfs_vdev_read_errors counter"
+
+    echo "# HELP zfs_vdev_write_errors Write errors per vdev"
+    echo "# TYPE zfs_vdev_write_errors counter"
+
+    echo "# HELP zfs_vdev_cksum_errors Checksum errors per vdev"
+    echo "# TYPE zfs_vdev_cksum_errors counter"
+
+    echo "# HELP zfs_resilver_in_progress Whether a resilver is in progress (1=yes, 0=no)"
+    echo "# TYPE zfs_resilver_in_progress gauge"
+
+    echo "# HELP zfs_resilver_percent_complete Resilver completion percentage"
+    echo "# TYPE zfs_resilver_percent_complete gauge"
+
+    echo "# HELP zfs_dataset_last_snapshot_seconds Unix timestamp of most recent snapshot per dataset"
+    echo "# TYPE zfs_dataset_last_snapshot_seconds gauge"
+
     # Check if pool is imported
     if ! zpool list -H -o name "${POOL_NAME}" &>/dev/null; then
         # Pool not imported - this node is standby
@@ -93,6 +123,54 @@ mkdir -p "${TEXTFILE_DIR}"
         else
             echo "zfs_scrub_last_run_errors_total{pool=\"${POOL_NAME}\"} 0"
         fi
+
+        # ─── Pool capacity ─────────────────────────────────────────────
+        POOL_DATA=$(zpool list -H -p -o size,alloc,free,frag "${POOL_NAME}" 2>/dev/null || echo "")
+        if [ -n "${POOL_DATA}" ]; then
+            POOL_SIZE=$(echo "${POOL_DATA}" | awk '{print $1}')
+            POOL_ALLOC=$(echo "${POOL_DATA}" | awk '{print $2}')
+            POOL_FREE=$(echo "${POOL_DATA}" | awk '{print $3}')
+            POOL_FRAG=$(echo "${POOL_DATA}" | awk '{print $4}' | tr -d '%')
+            echo "zfs_pool_size_bytes{pool=\"${POOL_NAME}\"} ${POOL_SIZE}"
+            echo "zfs_pool_allocated_bytes{pool=\"${POOL_NAME}\"} ${POOL_ALLOC}"
+            echo "zfs_pool_free_bytes{pool=\"${POOL_NAME}\"} ${POOL_FREE}"
+            echo "zfs_pool_fragmentation_percent{pool=\"${POOL_NAME}\"} ${POOL_FRAG}"
+        fi
+
+        # ─── Per-vdev error counts ──────────────────────────────────────
+        while IFS= read -r vdev_line; do
+            if echo "${vdev_line}" | grep -qE "^\s+(/dev/disk/by-id/|/dev/sd|/dev/nvme)[^ ]+\s+"; then
+                VDEV=$(echo "${vdev_line}" | awk '{print $1}' | xargs basename)
+                READ_ERR=$(echo "${vdev_line}" | awk '{print $3}')
+                WRITE_ERR=$(echo "${vdev_line}" | awk '{print $4}')
+                CKSUM_ERR=$(echo "${vdev_line}" | awk '{print $5}')
+                [[ "${READ_ERR}"  =~ ^[0-9]+$ ]] || READ_ERR=0
+                [[ "${WRITE_ERR}" =~ ^[0-9]+$ ]] || WRITE_ERR=0
+                [[ "${CKSUM_ERR}" =~ ^[0-9]+$ ]] || CKSUM_ERR=0
+                echo "zfs_vdev_read_errors{pool=\"${POOL_NAME}\",vdev=\"${VDEV}\"} ${READ_ERR}"
+                echo "zfs_vdev_write_errors{pool=\"${POOL_NAME}\",vdev=\"${VDEV}\"} ${WRITE_ERR}"
+                echo "zfs_vdev_cksum_errors{pool=\"${POOL_NAME}\",vdev=\"${VDEV}\"} ${CKSUM_ERR}"
+            fi
+        done <<< "${POOL_STATUS}"
+
+        # ─── Resilver progress ──────────────────────────────────────────
+        if echo "${POOL_STATUS}" | grep -q "resilver in progress"; then
+            echo "zfs_resilver_in_progress{pool=\"${POOL_NAME}\"} 1"
+            RESILVER_PCT=$(echo "${POOL_STATUS}" | grep -oE "[0-9]+\.[0-9]+%" | head -1 | tr -d '%' || echo "0")
+            echo "zfs_resilver_percent_complete{pool=\"${POOL_NAME}\"} ${RESILVER_PCT:-0}"
+        else
+            echo "zfs_resilver_in_progress{pool=\"${POOL_NAME}\"} 0"
+            echo "zfs_resilver_percent_complete{pool=\"${POOL_NAME}\"} 0"
+        fi
+
+        # ─── Snapshot age per dataset ───────────────────────────────────
+{% for ds in sanoid_datasets | default([]) %}
+        LAST_SNAP=$(zfs list -H -o creation -t snapshot -s creation "{{ ds.name }}" 2>/dev/null | tail -1)
+        if [ -n "${LAST_SNAP}" ]; then
+            SNAP_TS=$(date -d "${LAST_SNAP}" +%s 2>/dev/null || echo "0")
+            echo "zfs_dataset_last_snapshot_seconds{dataset=\"{{ ds.name }}\"} ${SNAP_TS}"
+        fi
+{% endfor %}
 
         echo "zfs_scrub_exporter_success 1"
     fi

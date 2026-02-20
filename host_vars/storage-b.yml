@@ -16,35 +16,55 @@ iscsi_initiator_name: "{{ iscsi_iqn_prefix }}:initiator-b"
 iscsi_peer_ip: "10.10.10.1"
 iscsi_peer_iqn: "{{ iscsi_iqn_prefix }}:storage-a"
 
+# ---------------------------------------------------------------------------
+# Local disks — MUST use persistent /dev/disk/by-id/ paths
+# ---------------------------------------------------------------------------
+# /dev/sdX paths are NOT stable — they reorder on reboot, drive replacement,
+# or BIOS update and will cause pool creation to target wrong disks.
+#
+# To find by-id paths on this node:
+#   ls -la /dev/disk/by-id/ | grep -v part | grep -v wwn
+#   Use ata-*, scsi-*, or nvme-* identifiers (NOT wwn — those are hardware-specific)
+#
+# Symmetric active/passive HA design:
+# Each node exports its local disks via LIO iSCSI target AND connects to the peer's target.
+# ZFS pool mirrors own local disks (physical) with peer's disks (iSCSI).
+# Either node can be active primary. On failover, the surviving node imports the pool
+# in degraded state (local disks only) and continues serving until the peer is restored.
+# Pool re-silvering restores full redundancy once the peer reconnects.
+
 local_data_disks:
-  - device: /dev/sda
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_0
     label: "data-b-0"
-  - device: /dev/sdb
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_1
     label: "data-b-1"
-  - device: /dev/sdc
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_2
     label: "data-b-2"
-  - device: /dev/sdd
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_3
     label: "data-b-3"
-  - device: /dev/sde
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_4
     label: "data-b-4"
-  - device: /dev/sdf
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_5
     label: "data-b-5"
-  - device: /dev/sdg
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_6
     label: "data-b-6"
-  - device: /dev/sdh
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_7
     label: "data-b-7"
-  - device: /dev/sdi
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_8
     label: "data-b-8"
-  - device: /dev/sdj
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_9
     label: "data-b-9"
-  - device: /dev/sdk
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_10
     label: "data-b-10"
-  - device: /dev/sdl
+  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_B_11
     label: "data-b-11"
 
+# Optional: SLOG and special vdev disks (NVMe recommended for SLOG)
+# SLOG accelerates sync writes (NFS sync, database commits) significantly.
+# Uncomment and replace placeholders if you have dedicated NVMe devices.
 # slog_disk:
-#   device: /dev/sdm
+#   device: /dev/disk/by-id/nvme-PLACEHOLDER_NVME_B
 #   label: "slog-b"
 # special_disk:
-#   device: /dev/sdn
+#   device: /dev/disk/by-id/nvme-PLACEHOLDER_SPECIAL_B
 #   label: "special-b"

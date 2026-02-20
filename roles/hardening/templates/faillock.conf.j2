@@ -1,0 +1,15 @@
+# Managed by Ansible — PAM faillock account lockout configuration
+# Affects all PAM-authenticated services (Samba, local login, etc.)
+# SSH is unaffected (key-only auth bypasses PAM authentication)
+
+# Lock account after this many failed attempts
+deny = 5
+
+# Unlock after this many seconds (1800 = 30 minutes)
+unlock_time = 1800
+
+# Log audit events for each lockout
+audit
+
+# Fail silently in preauth stage (don't reveal account exists)
+silent

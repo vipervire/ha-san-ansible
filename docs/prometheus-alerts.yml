@@ -109,6 +109,25 @@ groups:
             Pool san-pool is imported on {{ $value }} nodes. This should never happen!
             Possible Pacemaker failure or multihost protection bypass.
             Investigate immediately to prevent data corruption.
+          runbook: "See docs/alert-runbooks.md#zfspoolsplitbrain"
+
+      # Alert if Sanoid snapshots are overdue (requires Phase 15 exporter metric)
+      - alert: SanoidSnapshotOverdue
+        expr: |
+          (time() - zfs_dataset_last_snapshot_seconds) > 90000
+          and zfs_scrub_pool_imported{pool="san-pool"} == 1
+        for: 1h
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "ZFS dataset snapshot overdue on {{ $labels.instance }}"
+          description: |
+            Dataset {{ $labels.dataset }} on {{ $labels.instance }} has not had a snapshot
+            in over 25 hours. Sanoid may not be running.
+            Check: systemctl status sanoid.timer
+            Manual snapshot: sanoid --take-snapshots --verbose
+          runbook: "See docs/alert-runbooks.md#sanoidsnapshotoverdue"
 
   # =========================================================================
   # Pacemaker/Corosync Cluster Health Alerts
@@ -255,6 +274,22 @@ groups:
             {{ $value }} nodes reporting quorum.
             Manually verify cluster state on all nodes: pcs status
 
+      # ─── Stuck Resource Transitions ─────────────────────────────────
+      - alert: PacemakerResourceTransitionStuck
+        expr: ha_cluster_pacemaker_resources{managed="true",status=~"starting|stopping"} == 1
+        for: 10m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "Pacemaker resource {{ $labels.resource }} stuck in {{ $labels.status }}"
+          description: |
+            Resource {{ $labels.resource }} has been in {{ $labels.status }} state for over 10 minutes.
+            This may indicate a hung agent or fence failure.
+            Check: pcs status
+            Check logs: journalctl -u pacemaker -f
+          runbook: "See docs/alert-runbooks.md#pacemakerresourcetransitionstuck"
+
       # ─── Exporter Health ──────────────────────────────────────────────
       - alert: HAClusterExporterDown
         expr: up{job="ha_cluster"} == 0
@@ -268,3 +303,237 @@ groups:
             The ha_cluster_exporter on {{ $labels.instance }} is not responding.
             Check service: systemctl status prometheus-hacluster-exporter
             Check logs: journalctl -u prometheus-hacluster-exporter
+
+  # =========================================================================
+  # ZFS Pool Capacity and Vdev Alerts
+  # =========================================================================
+  - name: zfs_capacity_alerts
+    interval: 5m
+    rules:
+      - alert: ZFSPoolCapacityCritical
+        expr: |
+          zfs_pool_free_bytes / zfs_pool_size_bytes < 0.10
+          and zfs_scrub_pool_imported == 1
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "ZFS pool {{ $labels.pool }} critically low on space"
+          description: |
+            Pool {{ $labels.pool }} on {{ $labels.instance }} is over 90% full.
+            Free space: {{ $value | humanizePercentage }} remaining.
+            Add capacity or delete data immediately.
+          runbook: "See docs/alert-runbooks.md#zfspoolcapacitycritical"
+
+      - alert: ZFSPoolCapacityWarning
+        expr: |
+          zfs_pool_free_bytes / zfs_pool_size_bytes < 0.20
+          and zfs_scrub_pool_imported == 1
+        for: 15m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "ZFS pool {{ $labels.pool }} low on space"
+          description: |
+            Pool {{ $labels.pool }} on {{ $labels.instance }} is over 80% full.
+            Free space: {{ $value | humanizePercentage }} remaining.
+            Plan capacity expansion.
+          runbook: "See docs/alert-runbooks.md#zfspoolcapacitywarning"
+
+      - alert: ZFSVdevErrors
+        expr: |
+          (zfs_vdev_read_errors + zfs_vdev_write_errors + zfs_vdev_cksum_errors) > 0
+          and zfs_scrub_pool_imported == 1
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "ZFS vdev {{ $labels.vdev }} has errors"
+          description: |
+            Vdev {{ $labels.vdev }} in pool {{ $labels.pool }} on {{ $labels.instance }}
+            has I/O or checksum errors. Possible disk failure.
+            Check: zpool status -v {{ $labels.pool }}
+          runbook: "See docs/alert-runbooks.md#zfsvdeverrors"
+
+      - alert: ZFSResilverInProgress
+        expr: zfs_resilver_in_progress == 1
+        for: 1h
+        labels:
+          severity: info
+          component: storage
+        annotations:
+          summary: "ZFS resilver in progress on {{ $labels.instance }}"
+          description: |
+            Pool {{ $labels.pool }} on {{ $labels.instance }} is resilvering.
+            Progress: {{ with query (printf "zfs_resilver_percent_complete{pool=\"%s\",instance=\"%s\"}" $labels.pool $labels.instance) }}{{ . | first | value }}{{ end }}%
+            Monitor: watch zpool status {{ $labels.pool }}
+          runbook: "See docs/alert-runbooks.md#zfsresilverinprogress"
+
+      - alert: ZFSResilverStalled
+        expr: zfs_resilver_in_progress == 1
+        for: 4h
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "ZFS resilver stalled on {{ $labels.instance }}"
+          description: |
+            Pool {{ $labels.pool }} on {{ $labels.instance }} has been resilvering for over 4 hours.
+            Check if resilver is making progress: zpool status {{ $labels.pool }}
+            Check for failing vdevs that may be preventing completion.
+          runbook: "See docs/alert-runbooks.md#zfsresilverstalleg"
+
+  # =========================================================================
+  # STONITH / Fencing Probe Alerts
+  # =========================================================================
+  - name: stonith_alerts
+    interval: 2m
+    rules:
+      - alert: STONITHAgentUnreachable
+        expr: stonith_agent_reachable == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "STONITH fence agent {{ $labels.agent }} unreachable"
+          description: |
+            Fence agent {{ $labels.agent }} (method: {{ $labels.method }}) for target {{ $labels.target }}
+            is not responding to pings.
+            If fencing is needed and agent is unreachable, the cluster CANNOT safely fence the node.
+            Check device at IP in stonith_nodes config.
+          runbook: "See docs/alert-runbooks.md#stonithagentunreachable"
+
+      - alert: STONITHResourceFailed
+        expr: ha_cluster_pacemaker_resources{resource=~"fence-.*",status="failed"} == 1
+        for: 1m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "STONITH resource {{ $labels.resource }} has failed"
+          description: |
+            STONITH resource {{ $labels.resource }} is in failed state.
+            The cluster cannot fence node {{ $labels.resource | reReplaceAll "fence-" "" }}.
+            Clear failures: pcs resource cleanup {{ $labels.resource }}
+            Check config: pcs stonith show {{ $labels.resource }}
+          runbook: "See docs/alert-runbooks.md#stonithresourcefailed"
+
+  # =========================================================================
+  # Service Health Alerts
+  # =========================================================================
+  - name: service_health_alerts
+    interval: 1m
+    rules:
+      - alert: NFSServerDown
+        expr: |
+          ha_cluster_pacemaker_resources{resource="nfs-server",status="stopped",managed="true"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          component: services
+        annotations:
+          summary: "NFS server resource is stopped"
+          description: |
+            The nfs-server Pacemaker resource is stopped but should be managed.
+            NFS clients will be unable to mount shares.
+            Check: pcs resource status nfs-server
+            Logs: journalctl -u nfs-kernel-server
+          runbook: "See docs/alert-runbooks.md#nfsserverdown"
+
+      - alert: SMBServerDown
+        expr: |
+          ha_cluster_pacemaker_resources{resource="smb-server",status="stopped",managed="true"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          component: services
+        annotations:
+          summary: "SMB server resource is stopped"
+          description: |
+            The smb-server Pacemaker resource is stopped but should be managed.
+            SMB/CIFS clients will be unable to connect.
+            Check: pcs resource status smb-server
+            Logs: journalctl -u smbd
+          runbook: "See docs/alert-runbooks.md#smbserverdown"
+
+  # =========================================================================
+  # Node Health Alerts
+  # =========================================================================
+  - name: node_health_alerts
+    interval: 15m
+    rules:
+      - alert: NodeRebootRequired
+        expr: node_reboot_required == 1
+        for: 1h
+        labels:
+          severity: warning
+          component: os
+        annotations:
+          summary: "Node {{ $labels.instance }} requires a reboot"
+          description: |
+            Node {{ $labels.instance }} has pending updates that require a reboot.
+            Schedule maintenance: pcs node standby <node>
+            Reboot, then: pcs node unstandby <node>
+          runbook: "See docs/alert-runbooks.md#noderebootrequired"
+
+      - alert: NodeMemoryHigh
+        expr: |
+          (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.90
+        for: 10m
+        labels:
+          severity: warning
+          component: os
+        annotations:
+          summary: "Node {{ $labels.instance }} memory usage is high"
+          description: |
+            Node {{ $labels.instance }} is using over 90% of available memory.
+            Current usage: {{ $value | humanizePercentage }}.
+            Check ZFS ARC usage: arc_summary
+            Check processes: ps aux --sort=-%mem | head -20
+          runbook: "See docs/alert-runbooks.md#nodememoryhigh"
+
+  # =========================================================================
+  # Alertmanager Pipeline Watchdog
+  # =========================================================================
+  - name: watchdog
+    rules:
+      # This alert always fires, confirming the alerting pipeline is functional.
+      # Route to Uptime Kuma push endpoint in Alertmanager — if it stops firing,
+      # the pipeline (Prometheus → Alertmanager → ntfy) is broken.
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+          component: monitoring
+        annotations:
+          summary: "Alerting pipeline watchdog"
+          description: |
+            This alert always fires to confirm the alerting pipeline is working end-to-end.
+            If this stops arriving at Uptime Kuma, the Prometheus → Alertmanager → delivery
+            pipeline has a break.
+
+  # =========================================================================
+  # Alertmanager Inhibit Rules (add to alertmanager.yml)
+  # =========================================================================
+  #
+  # inhibit_rules:
+  #   # Suppress warnings when a critical alert fires for the same resource
+  #   - source_match: { severity: 'critical' }
+  #     target_match: { severity: 'warning' }
+  #     equal: ['alertname', 'instance']
+  #
+  #   # Suppress resource/service alerts when a cluster node is offline
+  #   - source_match: { alertname: 'ClusterNodeOffline' }
+  #     target_match_re:
+  #       alertname: 'ClusterResource.*|ZFSPool.*|Service.*Down|NFSServer.*|SMBServer.*'
+  #     equal: ['instance']
+  #
+  #   # Suppress resource transition/failover noise when quorum is lost
+  #   - source_match: { alertname: 'ClusterQuorumLost' }
+  #     target_match_re:
+  #       alertname: 'ClusterResource.*|ResourceMigration.*|Pacemaker.*|STONITH.*'
+  #     equal: []

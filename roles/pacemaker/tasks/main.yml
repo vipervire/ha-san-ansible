@@ -123,6 +123,30 @@
     mode: "0700"
   when: inventory_hostname == pacemaker_preferred_node | default('storage-a')
 
+# ─── Graceful standby on shutdown (storage nodes only) ────────────────────
+- name: Deploy pacemaker-node-standby systemd service
+  ansible.builtin.template:
+    src: pacemaker-node-standby.service.j2
+    dest: /etc/systemd/system/pacemaker-node-standby.service
+    mode: "0644"
+  when: inventory_hostname in groups['storage_nodes']
+  notify: reload systemd
+
+- name: Enable pacemaker-node-standby service
+  ansible.builtin.systemd:
+    name: pacemaker-node-standby.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: inventory_hostname in groups['storage_nodes']
+
+# ─── Corosync log rotation ─────────────────────────────────────────────────
+- name: Deploy Corosync logrotate configuration
+  ansible.builtin.template:
+    src: corosync-logrotate.j2
+    dest: /etc/logrotate.d/corosync
+    mode: "0644"
+
 # ─── STONITH setup (delegated to preferred node) ─────────────────────────
 - name: Generate STONITH configuration script
   ansible.builtin.template:

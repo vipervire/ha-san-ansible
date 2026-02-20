@@ -19,6 +19,10 @@
     map to guest = never
     restrict anonymous = 2
 
+    # Account lockout via PAM faillock (5 failed attempts → 30 min lockout)
+    obey pam restrictions = yes
+    pam password change = yes
+
     # Logging
     log level = 1 auth_audit:3
     logging = syslog

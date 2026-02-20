@@ -50,6 +50,18 @@
     enabled: true
     state: started
 
+# ─── PAM Account Lockout ──────────────────────────────────────────────────
+- name: Deploy PAM faillock configuration
+  ansible.builtin.template:
+    src: faillock.conf.j2
+    dest: /etc/security/faillock.conf
+    mode: "0644"
+
+- name: Enable PAM faillock module
+  ansible.builtin.command: pam-auth-update --enable faillock
+  changed_when: false
+  # pam-auth-update is idempotent — safe to re-run
+
 # ─── Disable unnecessary services ─────────────────────────────────────────
 - name: Disable IPv6 if not needed
   ansible.builtin.sysctl:

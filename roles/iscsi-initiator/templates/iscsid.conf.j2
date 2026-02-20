@@ -19,6 +19,11 @@ node.conn[0].timeo.noop_out_timeout = {{ iscsi_noop_out_timeout }}
 node.session.auth.authmethod = CHAP
 node.session.auth.username = {{ iscsi_chap_user }}
 node.session.auth.password = {{ iscsi_chap_password }}
+{% if iscsi_mutual_chap_enabled | default(false) %}
+# Mutual CHAP: initiator verifies target presents the correct credential
+node.session.auth.username_in = {{ iscsi_mutual_chap_user }}
+node.session.auth.password_in = {{ iscsi_mutual_chap_password }}
+{% endif %}
 {% else %}
 node.session.auth.authmethod = None
 {% endif %}

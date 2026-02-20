@@ -16,3 +16,21 @@ kernel.dmesg_restrict = 1
 
 # Restrict unprivileged access
 kernel.unprivileged_bpf_disabled = 1
+
+# Restrict ptrace — prevents credential extraction from other process memory
+# Level 2: only root may ptrace (safe for diagnostic tools)
+kernel.yama.ptrace_scope = 2
+
+# Symlink/hardlink protection — prevents certain privilege escalation attacks
+fs.protected_symlinks = 1
+fs.protected_hardlinks = 1
+
+# Restrict kernel performance counters to privileged users
+kernel.perf_event_paranoid = 3
+
+# ARP spoofing protection — only respond to ARP on correct interface
+net.ipv4.conf.all.arp_ignore = 1
+net.ipv4.conf.all.arp_announce = 2
+
+# Reduce swap aggressiveness — keep data in RAM for ZFS ARC efficiency
+vm.swappiness = 10

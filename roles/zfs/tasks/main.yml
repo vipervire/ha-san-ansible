@@ -23,6 +23,11 @@
     state: present
     update_cache: true
 
+# Compute ARC max dynamically: 50% of total RAM, unless overridden per-host via zfs_arc_max
+- name: Set ZFS ARC max (dynamic unless overridden in host_vars)
+  ansible.builtin.set_fact:
+    _zfs_arc_max: "{{ zfs_arc_max | default((ansible_memtotal_mb * 0.5 * 1024 * 1024) | int) }}"
+
 - name: Deploy ZFS module parameters
   ansible.builtin.template:
     src: zfs-modprobe.conf.j2

@@ -355,8 +355,77 @@ Run: systemctl start zfs-scrub@san-pool.service
 3. **Alertmanager**: Restrict access to management VLAN only
 4. **Sensitive Data**: Alert messages contain pool names and hostnames - ensure topics are private
 
+## Dead-Man's Switch with Uptime Kuma
+
+The `Watchdog` alert always fires (it uses `expr: vector(1)`), confirming the alerting pipeline
+(Prometheus → Alertmanager → ntfy) is functioning end-to-end. If the Watchdog heartbeat stops
+arriving, something in the pipeline is broken — even if no real alerts are firing.
+
+### Setup
+
+1. **Deploy Uptime Kuma** (self-hosted recommended):
+   ```bash
+   docker run -d --name uptime-kuma -p 3001:3001 -v uptime-kuma:/app/data louislam/uptime-kuma:1
+   ```
+
+2. **Create a Push monitor** in Uptime Kuma:
+   - Type: **Push**
+   - Heartbeat Interval: **5 minutes**
+   - Note the push URL shown: `https://uptime-kuma.example.com/api/push/<token>`
+
+3. **Add Watchdog receiver to Alertmanager**:
+   ```yaml
+   receivers:
+     - name: 'uptime-kuma-watchdog'
+       webhook_configs:
+         - url: 'https://uptime-kuma.example.com/api/push/<token>?status=up&msg=OK'
+           send_resolved: false
+   ```
+
+4. **Add Watchdog route** (before all other routes so it matches first):
+   ```yaml
+   routes:
+     - match:
+         alertname: Watchdog
+       receiver: uptime-kuma-watchdog
+       group_wait: 0s
+       repeat_interval: 5m
+     # ... existing routes below
+   ```
+
+5. **Configure Uptime Kuma notifications** — set Uptime Kuma to notify you (via ntfy, email, etc.)
+   when the push heartbeat stops arriving.
+
+Uptime Kuma will alert you via its own notification system if the Prometheus/Alertmanager pipeline
+goes silent for more than one missed interval.
+
+### Additional Alertmanager Inhibit Rules
+
+These suppress downstream noise when a root-cause alert is firing. Add to `alertmanager.yml`:
+
+```yaml
+inhibit_rules:
+  # Existing: suppress warnings when critical fires for same resource
+  - source_match: { severity: 'critical' }
+    target_match: { severity: 'warning' }
+    equal: ['alertname', 'instance']
+
+  # When a cluster node is offline, suppress resource/service alerts from that node
+  - source_match: { alertname: 'ClusterNodeOffline' }
+    target_match_re:
+      alertname: 'ClusterResource.*|ZFSPool.*|NFSServer.*|SMBServer.*'
+    equal: ['instance']
+
+  # When quorum is lost, suppress resource transition and failover noise
+  - source_match: { alertname: 'ClusterQuorumLost' }
+    target_match_re:
+      alertname: 'ClusterResource.*|ResourceMigration.*|Pacemaker.*|STONITH.*'
+    equal: []
+```
+
 ## References
 
 - [NTFY Documentation](https://docs.ntfy.sh/)
 - [Alertmanager Configuration](https://prometheus.io/docs/alerting/latest/configuration/)
 - [ntfy-alertmanager Bridge](https://github.com/xenrox/ntfy-alertmanager)
+- [Uptime Kuma](https://github.com/louislam/uptime-kuma)

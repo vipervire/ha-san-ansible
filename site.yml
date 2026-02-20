@@ -35,6 +35,29 @@
 #   A helper script is generated at /root/create-pool.sh on the active node.
 #
 
+# ─── Pre-flight: Validate credentials are not default placeholders ──────────
+- name: "Validate credentials have been customized"
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Assert sensitive variables are not default placeholders
+      ansible.builtin.assert:
+        that:
+          - "'CHANGEME' not in (hacluster_password | string)"
+          - "'CHANGEME' not in (iscsi_chap_password | string)"
+          - "'CHANGEME' not in (iscsi_mutual_chap_password | string)"
+        fail_msg: |
+          SECURITY ERROR: Default placeholder credentials detected.
+          Update before deploying:
+            hacluster_password         — ansible-vault encrypt_string 'yourpassword'
+            iscsi_chap_password        — ansible-vault encrypt_string 'yourpassword'
+            iscsi_mutual_chap_password — ansible-vault encrypt_string 'yourpassword'
+          Also verify STONITH passwords in stonith_nodes dict.
+      vars:
+        hacluster_password: "{{ hostvars[groups['storage_nodes'][0]]['hacluster_password'] | default('') }}"
+        iscsi_chap_password: "{{ hostvars[groups['storage_nodes'][0]]['iscsi_chap_password'] | default('') }}"
+        iscsi_mutual_chap_password: "{{ hostvars[groups['storage_nodes'][0]]['iscsi_mutual_chap_password'] | default('') }}"
+
 # ─── Play 1: Base setup on ALL nodes ────────────────────────────────────────
 - name: "Base OS setup and hardening (all nodes)"
   hosts: cluster

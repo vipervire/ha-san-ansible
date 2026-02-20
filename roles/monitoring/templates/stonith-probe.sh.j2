@@ -1,0 +1,23 @@
+#!/bin/bash
+# Managed by Ansible — STONITH agent reachability probe
+
+TEXTFILE_DIR="/var/lib/prometheus/node-exporter"
+TEXTFILE="${TEXTFILE_DIR}/stonith_probe.prom"
+TEXTFILE_TMP="${TEXTFILE}.$$"
+
+mkdir -p "${TEXTFILE_DIR}"
+
+{
+    echo "# HELP stonith_agent_reachable Whether STONITH fence agent IP is pingable (1=yes, 0=no)"
+    echo "# TYPE stonith_agent_reachable gauge"
+{% for node_name, node_cfg in stonith_nodes.items() %}
+    if ping -c 1 -W 3 "{{ node_cfg.ip }}" &>/dev/null; then
+        echo "stonith_agent_reachable{agent=\"fence-{{ node_name }}\",method=\"{{ node_cfg.method }}\",target=\"{{ node_name }}\"} 1"
+    else
+        echo "stonith_agent_reachable{agent=\"fence-{{ node_name }}\",method=\"{{ node_cfg.method }}\",target=\"{{ node_name }}\"} 0"
+    fi
+{% endfor %}
+} > "${TEXTFILE_TMP}"
+
+mv "${TEXTFILE_TMP}" "${TEXTFILE}"
+chmod 644 "${TEXTFILE}"

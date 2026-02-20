@@ -1,0 +1,21 @@
+#!/bin/bash
+# Managed by Ansible — exports whether a system reboot is pending
+
+TEXTFILE_DIR="/var/lib/prometheus/node-exporter"
+TEXTFILE="${TEXTFILE_DIR}/reboot_required.prom"
+TEXTFILE_TMP="${TEXTFILE}.$$"
+
+mkdir -p "${TEXTFILE_DIR}"
+
+{
+    echo "# HELP node_reboot_required Whether a system reboot is pending (1=yes, 0=no)"
+    echo "# TYPE node_reboot_required gauge"
+    if [ -f /var/run/reboot-required ]; then
+        echo "node_reboot_required 1"
+    else
+        echo "node_reboot_required 0"
+    fi
+} > "${TEXTFILE_TMP}"
+
+mv "${TEXTFILE_TMP}" "${TEXTFILE}"
+chmod 644 "${TEXTFILE}"

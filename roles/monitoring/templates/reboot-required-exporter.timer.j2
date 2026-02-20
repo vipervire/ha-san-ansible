@@ -1,0 +1,11 @@
+# Managed by Ansible — reboot-required metrics exporter timer
+[Unit]
+Description=Run reboot-required metrics exporter every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

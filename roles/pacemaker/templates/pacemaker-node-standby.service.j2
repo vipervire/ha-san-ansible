@@ -1,0 +1,27 @@
+# Managed by Ansible — graceful Pacemaker standby on shutdown/reboot
+#
+# On boot: removes this node from standby so it can host resources again.
+# On shutdown/reboot: puts this node into Pacemaker standby before pacemaker
+# itself stops. This triggers a planned resource migration (~5-8s) rather than
+# an unplanned failover, minimising client disruption.
+
+[Unit]
+Description=Graceful Pacemaker standby before shutdown / unstandby on boot
+Documentation=man:pcs(8)
+# Start/stop this service AFTER pacemaker is up (so both ExecStart and ExecStop
+# run while pacemaker is already running)
+After=pacemaker.service
+Requires=pacemaker.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# On boot: remove this node from standby so it can host resources
+ExecStart=/usr/sbin/pcs node unstandby %H
+# On stop (shutdown/reboot): put this node in standby, then wait for migration
+ExecStop=/usr/sbin/pcs node standby %H
+ExecStop=/bin/sleep {{ pacemaker_standby_drain_seconds | default(15) }}
+
+[Install]
+WantedBy=multi-user.target

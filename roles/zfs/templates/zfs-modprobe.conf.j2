@@ -1,4 +1,5 @@
 # Managed by Ansible — ZFS module parameters
+options zfs zfs_arc_max={{ _zfs_arc_max }}
 {% for key, value in zfs_modprobe_options.items() %}
 options zfs {{ key }}={{ value }}
 {% endfor %}

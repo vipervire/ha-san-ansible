@@ -1,0 +1,12 @@
+# Managed by Ansible — Corosync log rotation
+/var/log/corosync/corosync.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        /bin/kill -HUP $(cat /var/run/corosync.pid 2>/dev/null) 2>/dev/null || true
+    endscript
+}

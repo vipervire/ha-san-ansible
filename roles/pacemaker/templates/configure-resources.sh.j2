@@ -11,15 +11,12 @@ set -euo pipefail
 
 echo "=== Configuring Pacemaker HA resources ==="
 
-# ─── Prevent resources from running on quorum node ─────────────────────────
-pcs constraint location san-resources rule score=-INFINITY \#uname eq quorum 2>/dev/null || true
-
-# ─── ZFS pool import resource ──────────────────────────────────────────────
+# ─── ZFS pool import resource (anchor — everything colocates with this) ────
 echo "Creating ZFS pool resource"
 pcs resource create zfs-pool ocf:heartbeat:ZFS \
   pool="{{ zfs_pool_name }}" \
-  op start timeout=90s \
-  op stop timeout=60s \
+  op start timeout=150s \
+  op stop timeout=90s \
   op monitor interval=30s timeout=30s \
   2>/dev/null || echo "  (zfs-pool may already exist)"
 
@@ -64,15 +61,52 @@ pcs resource create cockpit-service systemd:cockpit.socket \
   op monitor interval=30s \
   2>/dev/null || echo "  (cockpit-service may already exist)"
 
-# ─── Resource group (strict ordering) ─────────────────────────────────────
-echo "Creating resource group"
-pcs resource group add san-resources \
-  zfs-pool vip-nfs vip-smb vip-iscsi vip-cockpit nfs-server smb-server cockpit-service \
-  2>/dev/null || echo "  (san-resources group may already exist)"
+# ─── Service groups (VIP + service, ordered within group) ──────────────────
+# Each group starts its VIP first, then its service — independently of other groups.
+# This allows NFS, SMB, and Cockpit to start in parallel after the pool is ready.
+echo "Creating service groups"
+pcs resource group add nfs-group vip-nfs nfs-server \
+  2>/dev/null || echo "  (nfs-group may already exist)"
 
-# ─── Prefer primary node (soft constraint) ─────────────────────────────────
-pcs constraint location san-resources prefers {{ pacemaker_preferred_node }}=100 \
-  2>/dev/null || echo "  (location constraint may already exist)"
+pcs resource group add smb-group vip-smb smb-server \
+  2>/dev/null || echo "  (smb-group may already exist)"
+
+pcs resource group add cockpit-group vip-cockpit cockpit-service \
+  2>/dev/null || echo "  (cockpit-group may already exist)"
+
+# vip-iscsi is standalone (no Pacemaker-managed service behind it)
+
+# ─── Ordering: pool must be fully started before any VIP/service group ─────
+# Groups start in parallel after pool — no ordering between groups.
+echo "Creating ordering constraints"
+pcs constraint order zfs-pool then nfs-group \
+  2>/dev/null || echo "  (order zfs-pool->nfs-group may already exist)"
+pcs constraint order zfs-pool then smb-group \
+  2>/dev/null || echo "  (order zfs-pool->smb-group may already exist)"
+pcs constraint order zfs-pool then vip-iscsi \
+  2>/dev/null || echo "  (order zfs-pool->vip-iscsi may already exist)"
+pcs constraint order zfs-pool then cockpit-group \
+  2>/dev/null || echo "  (order zfs-pool->cockpit-group may already exist)"
+
+# ─── Colocation: all resources must run on the same node as zfs-pool ───────
+echo "Creating colocation constraints"
+pcs constraint colocation add nfs-group with zfs-pool INFINITY \
+  2>/dev/null || echo "  (colocation nfs-group may already exist)"
+pcs constraint colocation add smb-group with zfs-pool INFINITY \
+  2>/dev/null || echo "  (colocation smb-group may already exist)"
+pcs constraint colocation add vip-iscsi with zfs-pool INFINITY \
+  2>/dev/null || echo "  (colocation vip-iscsi may already exist)"
+pcs constraint colocation add cockpit-group with zfs-pool INFINITY \
+  2>/dev/null || echo "  (colocation cockpit-group may already exist)"
+
+# ─── Location: prevent resources from running on quorum node ───────────────
+# Applied to zfs-pool; colocation propagates restriction to all other resources.
+pcs constraint location zfs-pool rule score=-INFINITY \#uname eq quorum \
+  2>/dev/null || true
+
+# ─── Prefer primary node (soft constraint — failover is still automatic) ───
+pcs constraint location zfs-pool prefers {{ pacemaker_preferred_node }}=100 \
+  2>/dev/null || echo "  (location preference may already exist)"
 
 echo ""
 echo "=== Pacemaker resource configuration complete ==="
@@ -81,7 +115,8 @@ pcs status
 echo ""
 echo "Operational commands:"
 echo "  Status:           pcs status"
-echo "  Planned failover: pcs resource move san-resources storage-b"
-echo "  Clear constraint: pcs resource clear san-resources"
+echo "  Constraints:      pcs constraint show"
+echo "  Planned failover: pcs resource move zfs-pool storage-b"
+echo "  Clear constraint: pcs resource clear zfs-pool"
 echo "  Maintenance mode: pcs node standby storage-a"
 echo "  End maintenance:  pcs node unstandby storage-a"
