@@ -632,9 +632,9 @@
 <pre><span class="comment"># /etc/iscsi/iscsid.conf — key settings</span>
 node.startup = automatic
 node.session.timeo.replacement_timeout = <span class="value">5</span>      <span class="comment"># Fast failover — don't wait minutes</span>
-node.conn[0].timeo.login_timeout = <span class="value">15</span>
-node.conn[0].timeo.noop_out_interval = <span class="value">5</span>
-node.conn[0].timeo.noop_out_timeout = <span class="value">5</span>
+node.conn[0].timeo.login_timeout = <span class="value">10</span>
+node.conn[0].timeo.noop_out_interval = <span class="value">2</span>
+node.conn[0].timeo.noop_out_timeout = <span class="value">2</span>
 node.session.auth.authmethod = CHAP
 node.session.auth.username = <span class="value">iscsiuser</span>
 node.session.auth.password = <span class="value">secretpassword</span>
@@ -1135,8 +1135,8 @@ pcs constraint location san-resources prefers storage-a=100</pre>
 <h3>NFS Configuration</h3>
 
 <pre><span class="comment"># /etc/exports (managed by Pacemaker — only relevant on active node)</span>
-/san-pool/nfs    <span class="value">10.30.30.0/24</span>(rw,sync,no_subtree_check,no_root_squash)
-/san-pool/k3s-pv <span class="value">10.30.30.0/24</span>(rw,sync,no_subtree_check,no_root_squash)
+/san-pool/nfs    <span class="value">10.30.30.0/24</span>(rw,sync,no_subtree_check,root_squash)
+/san-pool/k3s-pv <span class="value">10.30.30.0/24</span>(rw,sync,no_subtree_check,root_squash)
 
 <span class="comment"># /etc/nfs.conf — bind to VIP only</span>
 [nfsd]
@@ -1327,17 +1327,16 @@ vers4.1 = y</pre>
 
 <p>The critical difference: after a planned failover, Node A is still running and its LIO target is still exporting disks. Node B can see all 24 block devices — 12 local + 12 remote via iSCSI from A — so the pool is fully healthy immediately. No STONITH fires, no resilver, no degraded operation.</p>
 
-<pre><span class="comment"># Planned failover commands</span>
-pcs resource move san-resources storage-b
-
-<span class="comment"># IMPORTANT: clear the temporary location constraint after move completes</span>
-<span class="comment"># Otherwise Pacemaker will refuse to move resources back later</span>
-pcs resource clear san-resources
-
-<span class="comment"># For maintenance: put node in standby (handles all resource groups)</span>
+<pre><span class="comment"># Planned failover: put Node A in standby (Pacemaker migrates all resources)</span>
 pcs node standby storage-a
+
 <span class="comment"># ... do maintenance work ...</span>
-pcs node unstandby storage-a</pre>
+
+<span class="comment"># Bring Node A back into the cluster</span>
+pcs node unstandby storage-a
+
+<span class="comment"># Note: pacemaker-node-standby.service handles standby/unstandby automatically</span>
+<span class="comment"># during shutdown/boot — a clean reboot also triggers a planned failover</span></pre>
 
 <h3>Timing Comparison: Unplanned vs. Planned</h3>
 
@@ -1387,7 +1386,7 @@ pcs node unstandby storage-a</pre>
   <li><strong>Failed node comes back online.</strong> After repair or power restoration, the node boots normally. Its iSCSI target starts, re-exporting its local disks.</li>
   <li><strong>iSCSI sessions reconnect.</strong> The active node's open-iscsi initiator detects the peer's targets are available again and re-establishes sessions. The previously-faulted iSCSI LUNs reappear as block devices.</li>
   <li><strong>ZFS automatically resilvers.</strong> With <code>zfs_autoreplace=on</code> or manual intervention, ZFS begins resilvering the mirrors — syncing all changed blocks from the active (local) side to the recovered (remote) side. Sequential resilver is efficient on SSDs.</li>
-  <li><strong>Pool returns to healthy state.</strong> Once resilver completes, all 12 mirrors are fully redundant again. You can optionally fail back to the original primary node via <code>pcs resource move</code>.</li>
+  <li><strong>Pool returns to healthy state.</strong> Once resilver completes, all 12 mirrors are fully redundant again. You can optionally fail back to the original primary node via <code>pcs node standby</code> on the current active node.</li>
 </ol>
 
 <pre><span class="comment"># Monitor resilver progress</span>
@@ -1399,9 +1398,10 @@ zpool status san-pool
 <span class="comment">#     iscsi-b-lun0  ONLINE (resilvering)</span>
 
 <span class="comment"># Force a failback after recovery (optional)</span>
-pcs resource move san-resources storage-a
-<span class="comment"># Clear the constraint after move completes</span>
-pcs resource clear san-resources</pre>
+<span class="comment"># Put Node B in standby — resources migrate back to Node A (preferred node)</span>
+pcs node standby storage-b
+<span class="comment"># Wait for resources to migrate cleanly, then bring Node B back</span>
+pcs node unstandby storage-b</pre>
 
 <!-- ============================================================ -->
 <h2 id="tuning">10. Performance Tuning (Aggressive-Safe Profile)</h2>
@@ -1427,7 +1427,7 @@ max_messages: <span class="value">20</span>
 node.session.timeo.replacement_timeout = <span class="value">5</span>
 node.conn[0].timeo.noop_out_interval = <span class="value">2</span>
 node.conn[0].timeo.noop_out_timeout = <span class="value">2</span>
-node.conn[0].timeo.login_timeout = <span class="value">15</span>
+node.conn[0].timeo.login_timeout = <span class="value">10</span>
 node.startup = automatic
 
 <span class="comment"># Total detection: ~4s (2+2)</span>
@@ -1440,19 +1440,19 @@ node.startup = automatic
     <h4>ZFS Tunables</h4>
     <pre style="margin:0;border:none;padding:0.75rem;font-size:0.78rem"><span class="comment"># /etc/modprobe.d/zfs.conf</span>
 
-<span class="comment"># Limit ARC to leave RAM for VMs/K3s</span>
-options zfs zfs_arc_max=<span class="value">8589934592</span>  <span class="comment"># 8GB</span>
+<span class="comment"># ARC limit: set dynamically to 50% of RAM at deploy time</span>
+<span class="comment"># Override per-host: host_vars/&lt;node&gt;.yml  zfs_arc_max: 17179869184</span>
 
 <span class="comment"># Tune for SSD workloads</span>
 options zfs zfs_vdev_scheduler=none
-options zfs zfs_txg_timeout=<span class="value">5</span>
+options zfs zfs_txg_timeout=<span class="value">30</span>      <span class="comment"># Default; sync writes unaffected</span>
 
 <span class="comment"># Speed up resilver</span>
-options zfs zfs_resilver_min_time_ms=<span class="value">5000</span>
+options zfs zfs_resilver_min_time_ms=<span class="value">27000</span>  <span class="comment"># 27s minimum (OpenZFS recommended)</span>
 options zfs zfs_resilver_delay=<span class="value">0</span>
 
-<span class="comment"># Trust SSD flush (if using enterprise SSDs)</span>
-<span class="comment"># options zfs zfs_nocacheflush=1</span></pre>
+<span class="comment"># Trust SSD flush — safe with enterprise SSDs (hardware PLP)</span>
+options zfs zfs_nocacheflush=<span class="value">1</span></pre>
   </div>
   <div class="col-box">
     <h4>Network / TCP Tunables</h4>

@@ -596,10 +596,11 @@ ls -la /dev/disk/by-path/ | grep iscsi
 <pre><span class="comment"># Set stickiness so resources don't automatically move back</span>
 pcs resource defaults update resource-stickiness=200
 
-<span class="comment"># Manual failback when ready</span>
-pcs resource move san-resources storage-a
-<span class="comment"># Wait for services to stabilize, then clear the temporary constraint</span>
-pcs resource clear san-resources</pre>
+<span class="comment"># Manual failback when ready: put current active node in standby</span>
+<span class="comment"># Resources migrate back to Node A (preferred node)</span>
+pcs node standby storage-b
+<span class="comment"># Wait for resources to stabilize, then bring Node B back</span>
+pcs node unstandby storage-b</pre>
 
 <h4>Monitoring</h4>
 <p>Set up monitoring for pool health, resilver progress, iSCSI session state, and cluster status. Pacemaker's <code>crm_mon</code> gives you real-time cluster state. For external monitoring, export metrics via <code>node_exporter</code> with the ZFS collector enabled, and use Prometheus + Grafana (which you can run on your K3s cluster).</p>
@@ -931,25 +932,24 @@ chmod 600 /etc/samba/smbpasswd            <span class="comment"># If using tdbsa
 
 <p>A planned failover is faster (~5–8s vs ~10–12s), produces no pool degradation, and requires no resilver. The pool is cleanly exported on the active node — all dirty data is flushed, the final TXG is committed, and the ZIL/SLOG is emptied. Node B imports a clean pool with all 12 mirrors healthy since Node A is still running and still exporting its disks via LIO.</p>
 
-<pre><span class="comment"># Option 1: Move specific resource group to Node B</span>
-pcs resource move san-resources storage-b
+<pre><span class="comment"># Put Node A in standby — Pacemaker migrates all resources to Node B</span>
+pcs node standby storage-a
 
-<span class="comment"># CRITICAL: clear the temporary constraint after move completes</span>
-<span class="comment"># Otherwise Pacemaker will refuse to move resources back later</span>
-pcs resource clear san-resources
+<span class="comment"># ... do maintenance: firmware updates, disk swaps, reboot ...</span>
 
-<span class="comment"># Verify the move completed cleanly</span>
+<span class="comment"># Verify resources are running on Node B</span>
 pcs status
 
-<span class="comment"># Option 2: Put a node in standby (handles ALL resource groups)</span>
-<span class="comment"># Better for maintenance scenarios</span>
-pcs node standby storage-a
-<span class="comment"># ... do maintenance: firmware updates, disk swaps, reboot ...</span>
+<span class="comment"># Bring Node A back into the cluster</span>
 pcs node unstandby storage-a
 
-<span class="comment"># Option 3: Controlled failback after maintenance</span>
-pcs resource move san-resources storage-a
-pcs resource clear san-resources</pre>
+<span class="comment"># Note: pacemaker-node-standby.service handles standby/unstandby automatically</span>
+<span class="comment"># during shutdown/boot — a clean reboot also triggers a planned failover</span>
+
+<span class="comment"># Controlled failback after maintenance (optional — resource-stickiness prevents</span>
+<span class="comment"># automatic failback; let the resilver complete on Node B first)</span>
+pcs node standby storage-b
+pcs node unstandby storage-b</pre>
 
 <h3>Planned vs. Unplanned Comparison</h3>
 
@@ -1158,7 +1158,7 @@ pcs resource clear san-resources</pre>
       <li><strong>Run FIO benchmarks</strong> in both healthy and degraded states. Document baseline performance for future comparison.</li>
       <li><strong>Test with active NFS/SMB/iSCSI clients.</strong> Mount NFS on a test VM, write a large file, pull the active node's power mid-write. Verify the file isn't corrupted after failover.</li>
       <li><strong>Verify STONITH works from the quorum node.</strong> Can node C fence both A and B? Test this explicitly — a fencing agent that doesn't actually work is worse than no fencing at all.</li>
-      <li><strong>Test planned failover.</strong> Run <code>pcs resource move san-resources storage-b</code> with active clients. Time the outage — should be ~5–8s. Verify pool imports ONLINE (not DEGRADED) and no resilver starts. Don't forget <code>pcs resource clear</code>.</li>
+      <li><strong>Test planned failover.</strong> Run <code>pcs node standby storage-a</code> with active clients. Time the outage — should be ~5–8s. Verify pool imports ONLINE (not DEGRADED) and no resilver starts. Then <code>pcs node unstandby storage-a</code> to restore.</li>
       <li><strong>Test <code>pcs node standby</code> workflow.</strong> This is what you'll use for real maintenance. Verify all resources migrate cleanly and <code>unstandby</code> doesn't trigger unwanted failback (resource-stickiness should prevent it).</li>
       <li><strong>Measure actual failover times.</strong> Log timestamps at each phase (iSCSI fault, Corosync detection, STONITH, import, VIP up) for both planned and unplanned. Verify they match the aggressive-safe targets: ~10–12s unplanned, ~5–8s planned.</li>
     </ol>
