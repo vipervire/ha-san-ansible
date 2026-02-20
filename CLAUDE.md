@@ -2,33 +2,112 @@
 
 This file contains guidelines and reminders for maintaining and extending this Ansible playbook.
 
+## What This Playbook Does
+
+This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI SAN** on Debian 12. The architecture is:
+
+- **storage-a** and **storage-b**: Two symmetric storage nodes. Each exports its local disks via LIO iSCSI target to the peer, and connects to the peer's iSCSI target. A ZFS pool mirrors local physical disks with remote iSCSI disks. Either node can serve as active primary.
+- **quorum**: A lightweight third node that participates in Corosync/Pacemaker quorum voting only (no storage role).
+- **Active/passive HA**: Pacemaker manages a resource group (ZFS pool, VIPs, NFS, SMB, iSCSI client target, Cockpit) that runs on one node at a time. On failover, the surviving node imports the pool in degraded state and resumes service. The pool re-silvers to full redundancy when the peer reconnects.
+
+## Project Structure
+
+```
+.
+├── inventory.yml           # Hosts: storage-a (10.20.20.1), storage-b (10.20.20.2), quorum (10.20.20.3)
+├── site.yml               # Main playbook — 6 plays with tags
+├── group_vars/
+│   ├── all.yml            # Global vars: cluster name, VLANs, VIPs, Corosync tuning, SSH, NTP
+│   └── storage_nodes.yml  # Storage vars: ZFS, iSCSI, NFS, SMB, STONITH, Pacemaker, Sanoid, TCP tuning
+├── host_vars/
+│   ├── storage-a.yml      # Node-specific: IPs, iSCSI IQNs, local disk paths
+│   ├── storage-b.yml      # Node-specific: IPs, iSCSI IQNs, local disk paths
+│   └── quorum.yml         # Minimal: mgmt_ip and ssh_listen_addresses only
+├── roles/
+│   ├── common/            # Base OS: apt packages, NTP (chrony), package cleanup
+│   ├── hardening/         # Security: nftables firewall, SSH hardening, sysctl, PAM faillock
+│   ├── zfs/               # ZFS install, ARC tuning, modprobe options, Sanoid snapshots
+│   ├── iscsi-target/      # LIO iSCSI target setup (backend disk replication)
+│   ├── iscsi-initiator/   # open-iscsi initiator (connects to peer's target); generates create-pool.sh
+│   ├── pacemaker/         # Corosync + Pacemaker: cluster auth, corosync.conf, STONITH scripts
+│   ├── services/          # NFS, SMB, iSCSI client target; shared config dir on ZFS pool
+│   ├── monitoring/        # node_exporter, ha_cluster_exporter, ZFS scrub exporter, STONITH probe, reboot exporter
+│   └── cockpit/           # Cockpit + 45Drives Houston plugins
+└── docs/
+    ├── cluster-monitoring.md      # ha_cluster_exporter, Prometheus scrape configs, key metrics
+    ├── cockpit-ha-config.md       # Cockpit VIP + shared storage config sync (symlinks)
+    ├── dataset-best-practices.md  # ZFS dataset properties by workload type
+    ├── ha-san-design.html         # Architecture overview (HTML)
+    ├── ha-san-ops.html            # Operations runbook (HTML)
+    ├── nfs-security.md            # Why sec=sys is used; Kerberos alternative explanation
+    ├── ntfy-integration.md        # Prometheus Alertmanager → NTFY push notifications
+    ├── prometheus-alerts.yml      # Alert rule examples
+    ├── prometheus-recording-rules.yml  # Recording rules for aggregation
+    ├── stonith-migration.md       # Migrating from old global stonith_method to per-node dict
+    └── stonith-smart-plugs.md     # Smart plug fencing guide (Kasa, Tasmota, ESPHome, HTTP)
+```
+
+## Playbook Tags
+
+Run targeted subsets of the playbook with `--tags`:
+
+```bash
+# Full deployment (all roles, all nodes):
+ansible-playbook -i inventory.yml site.yml
+
+# Base OS + hardening only (all nodes):
+ansible-playbook -i inventory.yml site.yml --tags base
+
+# ZFS + iSCSI on storage nodes only:
+ansible-playbook -i inventory.yml site.yml --tags storage
+
+# Pacemaker cluster setup (all nodes):
+ansible-playbook -i inventory.yml site.yml --tags cluster
+
+# NFS/SMB/iSCSI client services (storage nodes):
+ansible-playbook -i inventory.yml site.yml --tags services
+
+# Cockpit + 45Drives Houston (storage nodes):
+ansible-playbook -i inventory.yml site.yml --tags cockpit
+
+# Monitoring exporters (all nodes):
+ansible-playbook -i inventory.yml site.yml --tags monitoring
+
+# Dry run with diff:
+ansible-playbook -i inventory.yml site.yml --check --diff
+```
+
 ## Critical Checks When Making Changes
 
 ### 1. Firewall Rules (nftables)
 
-**⚠️ IMPORTANT:** When adding new services, monitoring endpoints, or network-accessible components, **ALWAYS** check if firewall rules need updating.
+**IMPORTANT:** When adding new services, monitoring endpoints, or network-accessible components, **ALWAYS** check if firewall rules need updating.
 
-**File to check:** `roles/hardening/templates/nftables.conf.j2`
+**File:** `roles/hardening/templates/nftables.conf.j2`
+
+**Current firewall port assignments:**
+
+| VLAN | Ports | Services |
+|------|-------|----------|
+| Management (10.20.20.0/24) | 22/tcp | SSH |
+| Management | 5405/udp | Corosync (knet) |
+| Management | 2224/tcp | pcsd (Pacemaker) |
+| Management | 9090/tcp | Cockpit web UI |
+| Management | 9100/tcp | node_exporter |
+| Management | 9664/tcp | ha_cluster_exporter |
+| Storage (10.10.10.0/24) | 3260/tcp | iSCSI (backend replication) |
+| Storage | 5405/udp | Corosync ring1 (storage nodes only) |
+| Client (10.30.30.0/24) | 2049, 20048/tcp | NFS |
+| Client | 111/tcp+udp | NFS portmapper |
+| Client | 445/tcp | SMB |
+| Client | 3260/tcp | iSCSI (client-facing target) |
 
 **Common scenarios requiring firewall updates:**
 
-- **Adding monitoring exporters** (e.g., node_exporter, ha_cluster_exporter, custom exporters)
-  - Default ports: 9100 (node_exporter), 9664 (ha_cluster_exporter)
-  - Add rules to management VLAN section
-
-- **Adding web services** (e.g., Cockpit, Houston, monitoring dashboards)
-  - Default ports: 9090 (Cockpit), 3000 (Grafana), 9090 (Prometheus)
-  - Add rules to management VLAN section
-
-- **Adding cluster services** (e.g., Pacemaker components, Corosync rings)
-  - Ports: 2224 (pcsd), 5405 (Corosync), 21064 (Pacemaker)
-  - Check if already present before adding
-
-- **Adding storage protocols** (e.g., NFS, SMB, iSCSI)
-  - NFS: 2049, 111
-  - SMB: 445, 139
-  - iSCSI: 3260
-  - Add rules to client VLAN section
+- **Adding monitoring exporters** — add rule to management VLAN section
+- **Adding web services** — add rule to management VLAN section
+- **Adding storage protocols** — add rule to client VLAN section
+- **Adding cluster services** — check if port already present before adding
 
 **Example firewall rule:**
 ```nftables
@@ -38,11 +117,8 @@ ip saddr {{ vlans.management.subnet }} tcp dport 9664 accept
 
 **Testing after changes:**
 ```bash
-# Check nftables rules are applied
 ssh storage-a
 sudo nft list ruleset | grep <port-number>
-
-# Test connectivity from expected source
 curl http://10.20.20.1:<port>  # From management VLAN
 ```
 
@@ -55,7 +131,25 @@ When modifying STONITH/fencing configuration:
 - **Test:** Always test fencing in non-production before deploying
 - **Document:** Update `docs/stonith-smart-plugs.md` if adding new fence agent types
 
-**Supported methods:** ipmi, kasa, tasmota, esphome, http
+**Supported methods:** `ipmi`, `kasa`, `tasmota`, `esphome`, `http`
+
+The playbook supports **mixed per-node fencing methods**. Example:
+```yaml
+stonith_nodes:
+  storage-a:
+    method: "ipmi"           # Enterprise server with BMC
+    ip: "10.20.20.101"
+    user: "bmcadmin"
+    password: "CHANGEME-vault-this"
+  storage-b:
+    method: "kasa"           # Consumer server with smart plug
+    ip: "10.20.20.202"
+    # No credentials needed for Kasa local protocol
+```
+
+`python3-kasa` is installed automatically if any node uses method `kasa`. See `docs/stonith-smart-plugs.md` for all plug types and `docs/stonith-migration.md` for migrating from the old `stonith_method` global variable.
+
+**Never test STONITH without a maintenance window.** `pcs stonith fence <node>` powers off the node immediately.
 
 ### 3. Cockpit HA Configuration
 
@@ -73,33 +167,101 @@ When modifying Cockpit, NFS, or SMB configurations:
 **When editing NFS/SMB configs manually:**
 - Always edit the shared storage location, not the symlink target
 - Example: `vim /san-pool/cluster-config/nfs/exports` (correct)
-- NOT: `vim /etc/exports` (will work but less obvious it's on shared storage)
+- NOT: `vim /etc/exports` (works but less obvious it's on shared storage)
 
 ### 4. Monitoring Changes
 
-When adding new metrics or exporters:
+The monitoring role deploys these exporters on **all cluster nodes** (`hosts: cluster`):
 
-- **Update documentation:** `docs/cluster-monitoring.md`, `docs/ntfy-integration.md`
-- **Add alert rules:** `docs/prometheus-alerts.yml`
-- **Check firewall:** See section 1 above
-- **Test metrics:** Verify metrics are accessible from Prometheus server
-- **Update README:** Add to "Monitoring and Alerting" section
+| Exporter | Port | Purpose | Template/Source |
+|----------|------|---------|----------------|
+| `prometheus-node-exporter` | 9100 | System metrics | apt package |
+| `prometheus-hacluster-exporter` | 9664 | Pacemaker/Corosync metrics | `ha-cluster-exporter-default.j2` |
+| `zfs-scrub-exporter` (timer) | 9100 (textfile) | ZFS scrub state/timing | `zfs-scrub-exporter.{sh,service,timer}.j2` |
+| `reboot-required-exporter` (timer) | 9100 (textfile) | Pending reboot flag | `reboot-required-exporter.{sh,service,timer}.j2` |
+| `stonith-probe` (timer, storage nodes only) | 9100 (textfile) | STONITH agent reachability | `stonith-probe.{sh,service,timer}.j2` |
+
+Textfile exporters write `.prom` files to `/var/lib/prometheus/node-exporter/` for node_exporter to collect.
+
+**When adding new metrics or exporters:**
+1. Add script + systemd service/timer templates to `roles/monitoring/templates/`
+2. Add deploy tasks to `roles/monitoring/tasks/main.yml`
+3. **Add firewall rule** if using its own port (see section 1)
+4. Add alert rules to `docs/prometheus-alerts.yml`
+5. Document in `docs/cluster-monitoring.md` or `docs/ntfy-integration.md`
+6. Update README "Monitoring and Alerting" section
+
+**Controlling per-exporter behaviour:**
+```yaml
+# group_vars/all.yml
+ha_cluster_monitoring_enabled: true   # toggles ha_cluster_exporter
+# group_vars/storage_nodes.yml
+zfs_scrub_monitoring_enabled: true    # toggles ZFS scrub exporter
+```
 
 ### 5. Per-Node vs. Global Configuration
 
-**Per-node settings** (in `host_vars/<hostname>.yml`):
-- Disk layouts (`local_data_disks`)
-- IP addresses (mgmt_ip, storage_ip, client_ip)
-- iSCSI IQNs (initiator and target)
+**Per-node settings** (`host_vars/<hostname>.yml`):
+- Disk layouts (`local_data_disks`) — must use stable `/dev/disk/by-id/` paths, never `/dev/sdX`
+- IP addresses (`mgmt_ip`, `storage_ip`, `client_ip`)
+- iSCSI IQNs (`iscsi_target_iqn`, `iscsi_initiator_name`, `iscsi_peer_ip`, `iscsi_peer_iqn`)
+- Optional `zfs_arc_max` override (otherwise computed as 50% of RAM at deploy time)
+- Optional `slog_disk` and `special_disk` for NVMe SLOG/special vdevs
 
-**Global settings** (in `group_vars/all.yml` or `group_vars/storage_nodes.yml`):
-- VLAN configuration
-- Virtual IPs (VIPs)
-- Service ports
-- Cluster settings
-- STONITH configuration (now per-node in stonith_nodes dict)
+**Global settings** (`group_vars/all.yml`):
+- VLAN configuration, VIPs (`vip_nfs`, `vip_smb`, `vip_iscsi`, `vip_cockpit`)
+- Cluster name and Corosync node list
+- Corosync tuning (`corosync_token`, `corosync_consensus`, etc.)
+- Monitoring flags (`ha_cluster_monitoring_enabled`, ports)
+- SSH policy, NTP servers, admin user
 
-### 6. Idempotency
+**Storage node settings** (`group_vars/storage_nodes.yml`):
+- ZFS pool name, ashift, pool/dataset options, modprobe tunables
+- ZFS scrub schedule (`zfs_scrub_schedule`) and monitoring toggle
+- iSCSI CHAP credentials (must be vault-encrypted in production)
+- NFS exports (`nfs_exports`), SMB shares (`smb_shares`)
+- STONITH configuration (`stonith_nodes` dict)
+- Pacemaker tuning (`pacemaker_resource_stickiness`, `pacemaker_preferred_node`, `pacemaker_standby_drain_seconds`)
+- Sanoid snapshot templates and dataset policies
+- TCP tuning for 40GbE (`tcp_tunables` dict)
+
+### 6. ZFS Tunables
+
+ZFS module parameters are written to `/etc/modprobe.d/zfs.conf` via template (`roles/zfs/templates/zfs-modprobe.conf.j2`). The `zfs_arc_max` is computed dynamically (50% of total RAM) and injected separately as a fact.
+
+**Current tunables (`group_vars/storage_nodes.yml`):**
+```yaml
+zfs_modprobe_options:
+  zfs_vdev_scheduler: "none"          # No I/O scheduler (SSDs only)
+  zfs_txg_timeout: 30                 # Reduces write latency stalls
+  zfs_resilver_min_time_ms: 27000     # Steady drive recovery (OpenZFS recommended)
+  zfs_resilver_delay: 0
+  zfs_nocacheflush: 1                 # ONLY safe with enterprise SSDs with hardware PLP
+```
+
+**WARNING:** `zfs_nocacheflush: 1` bypasses drive write-cache flush. Only enable on enterprise SSDs with power-loss protection (PLP). Never enable on consumer drives or spinning disks.
+
+**To override ARC max per-host:**
+```yaml
+# host_vars/storage-a.yml
+zfs_arc_max: 17179869184  # 16GB — explicit per-host override
+```
+
+### 7. Sanoid Snapshot Policy
+
+Sanoid is optionally installed and configured for automated ZFS snapshots:
+```yaml
+# group_vars/storage_nodes.yml
+sanoid_install: true     # Set false to skip Sanoid entirely
+
+sanoid_templates:
+  production:  { hourly: 24, daily: 30, monthly: 6, autosnap: true, autoprune: true }
+  vm_storage:  { hourly: 12, daily: 14, monthly: 3, autosnap: true, autoprune: true }
+```
+
+Default datasets snapshotted: `san-pool/nfs` (production), `san-pool/smb` (production), `san-pool/iscsi` (vm_storage).
+
+### 8. Idempotency
 
 Always ensure tasks are idempotent:
 
@@ -117,7 +279,7 @@ Always ensure tasks are idempotent:
   failed_when: result.rc != 0 and 'already exists' not in result.stderr
 ```
 
-### 7. Secrets Management
+### 9. Secrets Management
 
 **Never commit plain text secrets!**
 
@@ -125,43 +287,21 @@ Always ensure tasks are idempotent:
 - Mark vault-required values with comments: `# ansible-vault encrypt_string`
 - Files with secrets: `group_vars/storage_nodes.yml`, `host_vars/*.yml`
 
-**Example:**
+The playbook has a **pre-flight validation play** (first play in `site.yml`) that fails immediately if any credential still contains the string `CHANGEME`. Vault these before deploying:
+- `hacluster_password` (`group_vars/all.yml`)
+- `iscsi_chap_password` (`group_vars/storage_nodes.yml`)
+- `iscsi_mutual_chap_password` (`group_vars/storage_nodes.yml`)
+- `stonith_nodes.<node>.password` (`group_vars/storage_nodes.yml`)
+
+```bash
+ansible-vault encrypt_string 'yourpassword' --name 'hacluster_password'
+```
+
+**Example vault entry:**
 ```yaml
 hacluster_password: !vault |
   $ANSIBLE_VAULT;1.1;AES256
   ...encrypted...
-```
-
-## Project Structure
-
-```
-.
-├── inventory.yml           # Inventory file (hostnames, groups)
-├── site.yml               # Main playbook
-├── group_vars/
-│   ├── all.yml           # Global variables (VLANs, VIPs, cluster name)
-│   └── storage_nodes.yml # Storage-specific (ZFS, iSCSI, STONITH, NFS, SMB)
-├── host_vars/
-│   ├── storage-a.yml     # Node-specific (IPs, disks, IQNs)
-│   ├── storage-b.yml
-│   └── quorum.yml
-├── roles/
-│   ├── common/           # Base OS setup, packages, repos
-│   ├── hardening/        # Security (nftables, SSH, sysctl)
-│   ├── zfs/              # ZFS module, pool creation, scrub automation
-│   ├── iscsi-target/     # LIO target setup (backend replication)
-│   ├── iscsi-initiator/  # open-iscsi initiator (backend replication)
-│   ├── pacemaker/        # Cluster setup, STONITH, resource configuration
-│   ├── services/         # NFS, SMB, iSCSI client-facing target
-│   ├── monitoring/       # node_exporter, ha_cluster_exporter, custom exporters
-│   └── cockpit/          # 45Drives Houston + Cockpit
-└── docs/
-    ├── cluster-monitoring.md    # HA cluster monitoring guide
-    ├── cockpit-ha-config.md     # Cockpit HA configuration guide
-    ├── stonith-smart-plugs.md   # Smart plug fencing guide
-    ├── stonith-migration.md     # Migration guide for STONITH config
-    ├── ntfy-integration.md      # Prometheus + NTFY alerting
-    └── prometheus-alerts.yml    # Example alert rules
 ```
 
 ## Common Tasks
@@ -170,111 +310,128 @@ hacluster_password: !vault |
 
 1. Create role in `roles/<service-name>/`
 2. Add tasks, templates, handlers
-3. Include role in `site.yml`
-4. **Check firewall rules** (nftables.conf.j2)
-5. Add configuration variables to appropriate group_vars
-6. Document in README.md
-7. Test deployment
+3. Include role in `site.yml` (choose the right play and hosts group)
+4. **Check firewall rules** (`roles/hardening/templates/nftables.conf.j2`)
+5. Add configuration variables to appropriate `group_vars/`
+6. Document in `README.md`
+7. Test: `ansible-playbook -i inventory.yml site.yml --tags <tag>`
 
 ### Adding Monitoring for a Component
 
-1. Create metrics exporter script or install package
-2. Deploy to appropriate nodes
-3. **Add firewall rule for metrics port**
-4. Add scrape config to Prometheus
+1. Create textfile exporter script or install package
+2. Deploy via `roles/monitoring/tasks/main.yml`
+3. **Add firewall rule for metrics port** (if not using textfile collector via 9100)
+4. Add Prometheus scrape config
 5. Create alert rules in `docs/prometheus-alerts.yml`
-6. Document in `docs/cluster-monitoring.md` or relevant doc
-7. Test metrics collection and alerts
+6. Document in `docs/cluster-monitoring.md`
+7. Test: `curl http://10.20.20.1:9100/metrics | grep <your_metric>`
 
 ### Modifying STONITH Configuration
 
-1. Update `group_vars/storage_nodes.yml` (stonith_nodes dict)
-2. Run playbook: `ansible-playbook -i inventory.yml site.yml --tags pacemaker`
+1. Update `stonith_nodes` dict in `group_vars/storage_nodes.yml`
+2. Run playbook: `ansible-playbook -i inventory.yml site.yml --tags cluster`
 3. Regenerate config: `ssh storage-a 'sudo bash /root/configure-stonith.sh'`
 4. Verify: `pcs stonith status`
 5. Test (careful!): `pcs stonith fence storage-b` (powers off node!)
 
+### Adding or Changing ZFS Datasets
+
+1. Update `zfs_datasets` in `group_vars/storage_nodes.yml`
+2. Consult `docs/dataset-best-practices.md` for recommended properties by workload
+3. Run: `ansible-playbook -i inventory.yml site.yml --tags storage`
+4. Note: the `zpool create` step is always manual (verify iSCSI paths first)
+
 ## Known Issues / Gotchas
 
-### 1. iSCSI Disk Paths
+### 1. ZFS Pool Creation Is Manual
 
-- iSCSI disk paths (`/dev/disk/by-path/`) may vary between runs
-- Always verify paths in `create-pool.sh` before running
-- Template generates script but requires manual verification
-
-### 2. STONITH Testing
-
-- STONITH tests are destructive (power off nodes)
-- Always test during maintenance windows
-- Never test without understanding the impact
-- `pcs stonith fence <node>` will POWER OFF the node!
-
-### 3. ZFS Pool Import
-
-- Pool must be exported before Pacemaker can manage it
-- `zpool export san-pool` required after manual pool creation
-- Pacemaker will refuse to start resources if pool is already imported
-
-### 4. Firewall Port Requirements
-
-- **Management VLAN (10.20.20.0/24):**
-  - SSH: 22
-  - Corosync: 5405 (UDP)
-  - pcsd: 2224
-  - Cockpit: 9090
-  - node_exporter: 9100
-  - ha_cluster_exporter: 9664
-
-- **Storage VLAN (10.10.10.0/24):**
-  - iSCSI (backend): 3260
-  - Corosync ring1: 5405 (UDP)
-
-- **Client VLAN (10.30.30.0/24):**
-  - NFS: 2049, 111
-  - SMB: 445
-  - iSCSI (client): 3260
-
-## Testing Procedures
-
-### Full Deployment Test
+The playbook configures everything _up to_ pool creation. The actual `zpool create` requires manual verification of iSCSI device paths (they vary per environment). A helper script `/root/create-pool.sh` is generated on the `pacemaker_preferred_node` after iSCSI initiator role runs.
 
 ```bash
-# 1. Deploy configuration
+ssh storage-a 'ls -la /dev/disk/by-path/ | grep iscsi'  # verify paths first
+ssh storage-a 'sudo bash /root/create-pool.sh'
+ssh storage-a 'sudo zpool export san-pool'               # required before Pacemaker starts
+```
+
+### 2. iSCSI Disk Paths
+
+- `/dev/sdX` paths are **not stable** — they reorder on reboot, drive replacement, or BIOS update
+- Always use `/dev/disk/by-id/` paths in `host_vars/`
+- Never use `wwn-*` identifiers (hardware-specific, may not match across environments)
+- iSCSI device paths (`/dev/disk/by-path/`) may also vary between runs — always verify in `create-pool.sh`
+
+### 3. STONITH Testing Is Destructive
+
+- STONITH tests power off nodes immediately
+- Always test during maintenance windows
+- `pcs stonith fence <node>` will POWER OFF the node!
+
+### 4. ZFS Pool Must Be Exported Before Pacemaker Starts
+
+Pacemaker refuses to start the ZFS pool resource if the pool is already imported. After manual pool creation, always run `zpool export san-pool` before starting Pacemaker resources.
+
+### 5. Mutual CHAP Passwords Must Differ
+
+`iscsi_mutual_chap_password` must be different from `iscsi_chap_password`. iSCSI rejects identical bidirectional credentials.
+
+### 6. Corosync Requires Synchronized Clocks
+
+All nodes must have synchronized clocks (chrony is deployed by the `common` role). Corosync token timeouts are aggressive-safe (`corosync_token: 4000ms`). Do not lower below 3000ms.
+
+### 7. 45Drives Houston Packages May Fail
+
+`cockpit-file-sharing`, `cockpit-identities`, `cockpit-navigator` are installed with `ignore_errors: true` because the 45Drives repository may not have packages for all architectures or Debian releases.
+
+### 8. Firewall Port Requirements (Summary)
+
+- **Management VLAN (10.20.20.0/24):** SSH: 22, Corosync: 5405/udp, pcsd: 2224, Cockpit: 9090, node_exporter: 9100, ha_cluster_exporter: 9664
+- **Storage VLAN (10.10.10.0/24):** iSCSI (backend): 3260, Corosync ring1: 5405/udp
+- **Client VLAN (10.30.30.0/24):** NFS: 2049, 20048, 111, SMB: 445, iSCSI (client): 3260
+
+## Full Deployment Workflow
+
+```bash
+# 1. Set secrets in group_vars and host_vars (vault-encrypt all passwords)
+# 2. Set local disk paths in host_vars/storage-a.yml and storage-b.yml using /dev/disk/by-id/
+# 3. Deploy configuration (stops before pool creation)
 ansible-playbook -i inventory.yml site.yml
 
-# 2. Verify cluster formation
+# 4. Verify cluster formation
 ssh storage-a 'pcs status'
 
-# 3. Create and export pool
-ssh storage-a 'sudo bash /root/create-pool.sh'
+# 5. Configure STONITH
+ssh storage-a 'sudo bash /root/configure-stonith.sh'
+ssh storage-a 'pcs stonith status'
+
+# 6. Verify iSCSI paths and create ZFS pool
+ssh storage-a 'ls -la /dev/disk/by-path/ | grep iscsi'
+ssh storage-a 'sudo bash /root/create-pool.sh'    # verify paths first!
 ssh storage-a 'sudo zpool export san-pool'
 
-# 4. Configure STONITH
-ssh storage-a 'sudo bash /root/configure-stonith.sh'
-
-# 5. Configure Pacemaker resources
+# 7. Configure Pacemaker resources
 ssh storage-a 'sudo bash /root/configure-pacemaker-resources.sh'
 
-# 6. Verify all resources running
+# 8. Verify all resources running
 ssh storage-a 'pcs status'
 ```
+
+## Testing Procedures
 
 ### Monitoring Test
 
 ```bash
-# 1. Check exporters are running
+# Check exporters are running
 ssh storage-a 'systemctl status prometheus-node-exporter'
 ssh storage-a 'systemctl status prometheus-hacluster-exporter'
 ssh storage-a 'systemctl status zfs-scrub-exporter.timer'
+ssh storage-a 'systemctl status stonith-probe.timer'
+ssh storage-a 'systemctl status reboot-required-exporter.timer'
 
-# 2. Test metrics endpoints
-curl http://10.20.20.1:9100/metrics | head
-curl http://10.20.20.1:9664/metrics | head
+# Test metrics endpoints
 curl http://10.20.20.1:9100/metrics | grep zfs_scrub
-
-# 3. Configure Prometheus scrape targets
-# 4. Verify metrics in Prometheus UI
-# 5. Test alert rules
+curl http://10.20.20.1:9100/metrics | grep stonith_agent_reachable
+curl http://10.20.20.1:9100/metrics | grep node_reboot_required
+curl http://10.20.20.1:9664/metrics | grep ha_cluster
 ```
 
 ### Failover Test
@@ -283,14 +440,14 @@ curl http://10.20.20.1:9100/metrics | grep zfs_scrub
 # 1. Check current resource location
 pcs status
 
-# 2. Planned failover
+# 2. Planned failover (graceful migration)
 pcs resource move san-resources storage-b
-# Wait for failover to complete
-pcs resource clear san-resources
+# Wait for resources to come up on storage-b
+pcs resource clear san-resources  # remove location constraint
 
 # 3. Verify resources on new node
-pcs status
-zpool status san-pool  # On storage-b
+ssh storage-b 'pcs status'
+ssh storage-b 'zpool status san-pool'
 ```
 
 ## References
@@ -300,9 +457,11 @@ zpool status san-pool  # On storage-b
 - [OpenZFS Documentation](https://openzfs.github.io/openzfs-docs/)
 - [Prometheus Alerting](https://prometheus.io/docs/alerting/latest/)
 - [NTFY Documentation](https://docs.ntfy.sh/)
+- [TP-Link Kasa Python library](https://python-kasa.readthedocs.io/)
 
 ## Change Log
 
+- **2026-02-20**: Comprehensive CLAUDE.md update — added architecture overview, playbook tags, new monitoring exporters (stonith-probe, reboot-required-exporter), ZFS tunable notes, Sanoid snapshot policy, complete firewall port table, NFS security doc, dataset best practices doc, HTML design/ops docs, stonith-migration doc, full deployment workflow
 - **2025-02-16**: Added Cockpit HA configuration (VIP + shared storage config sync)
 - **2025-02-16**: Added mixed STONITH configuration support (per-node methods)
 - **2025-02-16**: Added comprehensive monitoring (ZFS scrubs, cluster health)
