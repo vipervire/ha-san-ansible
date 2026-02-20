@@ -13,8 +13,8 @@ Two-node active/passive storage cluster with quorum, deploying:
 ## Architecture
 
 ```
-┌─────────────────┐     iSCSI/40GbE      ┌─────────────────┐
-│   storage-a     │◄────────────────────►│   storage-b     │
+┌─────────────────┐     iSCSI/40GbE       ┌─────────────────┐
+│   storage-a     │◄─────────────────────►│   storage-b     │
 │   (ACTIVE)      │    VLAN 10 / MTU 9000 │   (STANDBY)     │
 │                 │                       │                 │
 │  12× 1TB SSDs   │                       │  12× 1TB SSDs   │
@@ -22,7 +22,7 @@ Two-node active/passive storage cluster with quorum, deploying:
 │  open-iscsi     │                       │  open-iscsi     │
 │  ZFS pool       │                       │  (ready)        │
 │  NFS/SMB/iSCSI  │                       │                 │
-│  Pacemaker      │◄──── Corosync ──────►│  Pacemaker      │
+│  Pacemaker      │◄──── Corosync ───────►│  Pacemaker      │
 └────────┬────────┘                       └────────┬────────┘
          │              ┌──────────┐               │
          └──────────────┤  quorum  ├───────────────┘
