@@ -11,3 +11,8 @@
 - name: reload systemd
   ansible.builtin.systemd:
     daemon_reload: true
+
+- name: restart zfs-zed
+  ansible.builtin.systemd:
+    name: zfs-zed
+    state: restarted

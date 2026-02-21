@@ -1,0 +1,14 @@
+# Managed by Ansible — Syncoid ZFS snapshot replication service
+[Unit]
+Description=Syncoid ZFS snapshot replication
+After=zfs-import.target network.target
+
+[Service]
+Type=oneshot
+{% for target in syncoid_targets | default([]) %}
+ExecStart=/usr/sbin/syncoid --no-privilege-elevation {{ target.source }} {{ target.destination }}
+{% endfor %}
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=syncoid
+NoNewPrivileges=true

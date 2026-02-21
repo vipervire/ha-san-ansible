@@ -114,3 +114,53 @@
     state: started
     daemon_reload: true
   when: zfs_scrub_enabled | default(true)
+
+# ─── ZED → ntfy event notifications ────────────────────────────────────────
+# Provides immediate push alerts for pool events (complements Prometheus polling).
+# Events covered: vdev_degrade, resilver_start/finish, pool_import/export.
+- name: Ensure ZED event handler directory exists
+  ansible.builtin.file:
+    path: /etc/zfs/zed.d
+    state: directory
+    mode: "0755"
+  when: zed_ntfy_enabled | default(false)
+
+- name: Deploy ZED ntfy notification handler
+  ansible.builtin.template:
+    src: zed-ntfy.sh.j2
+    dest: /etc/zfs/zed.d/all-zed-ntfy.sh
+    mode: "0755"
+  when: zed_ntfy_enabled | default(false)
+  notify: restart zfs-zed
+
+- name: Set ZED notification verbosity
+  ansible.builtin.lineinfile:
+    path: /etc/zfs/zed.rc
+    regexp: '^#?ZED_NOTIFY_VERBOSE='
+    line: "ZED_NOTIFY_VERBOSE=0"
+  when: zed_ntfy_enabled | default(false)
+
+# ─── Syncoid offsite replication (optional) ────────────────────────────────
+- name: Deploy syncoid replication systemd service
+  ansible.builtin.template:
+    src: syncoid.service.j2
+    dest: /etc/systemd/system/syncoid-replication.service
+    mode: "0644"
+  when: syncoid_enabled | default(false) and sanoid_install | default(false)
+  notify: reload systemd
+
+- name: Deploy syncoid replication systemd timer
+  ansible.builtin.template:
+    src: syncoid.timer.j2
+    dest: /etc/systemd/system/syncoid-replication.timer
+    mode: "0644"
+  when: syncoid_enabled | default(false) and sanoid_install | default(false)
+  notify: reload systemd
+
+- name: Enable syncoid replication timer
+  ansible.builtin.systemd:
+    name: syncoid-replication.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: syncoid_enabled | default(false) and sanoid_install | default(false)

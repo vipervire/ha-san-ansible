@@ -516,6 +516,116 @@ groups:
             If this stops arriving at Uptime Kuma, the Prometheus → Alertmanager → delivery
             pipeline has a break.
 
+  - name: disk_health
+    rules:
+      - alert: DiskSMARTUnhealthy
+        expr: node_disk_smart_healthy == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "SMART failure on {{ $labels.instance }} device {{ $labels.device }}"
+          description: |
+            Disk {{ $labels.device }} (serial: {{ $labels.serial }}) reports SMART failure.
+            Immediate replacement required. Check: smartctl -H /dev/{{ $labels.device }}
+
+      - alert: DiskReallocatedSectors
+        expr: node_disk_smart_reallocated_sectors_total > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "Reallocated sectors on {{ $labels.instance }} device {{ $labels.device }}"
+          description: |
+            Disk {{ $labels.device }} (serial: {{ $labels.serial }}) has {{ $value }} reallocated sectors.
+            Drive may be failing — monitor closely and consider replacement.
+
+      - alert: DiskTemperatureHigh
+        expr: node_disk_smart_temperature_celsius > 55
+        for: 15m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "High disk temperature on {{ $labels.instance }} device {{ $labels.device }}"
+          description: "Drive {{ $labels.device }} temperature is {{ $value }}°C. Check airflow/cooling."
+
+      - alert: NVMeWearCritical
+        expr: node_disk_nvme_percentage_used > 90
+        for: 15m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "NVMe wear level critical on {{ $labels.instance }} device {{ $labels.device }}"
+          description: "NVMe {{ $labels.device }} (serial: {{ $labels.serial }}) is {{ $value }}% worn."
+
+      - alert: NVMeAvailableSparelow
+        expr: node_disk_nvme_available_spare_percent < 20
+        for: 15m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "NVMe low spare capacity on {{ $labels.instance }} device {{ $labels.device }}"
+          description: "NVMe {{ $labels.device }} available spare is {{ $value }}%."
+
+  - name: memory_health
+    rules:
+      - alert: MemoryECCUncorrectable
+        expr: node_memory_uncorrectable_errors_total > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: hardware
+        annotations:
+          summary: "Uncorrectable ECC memory errors on {{ $labels.instance }}"
+          description: |
+            {{ $value }} uncorrectable memory errors detected on {{ $labels.instance }}.
+            Risk of data corruption — investigate DIMM health immediately.
+
+      - alert: MemoryECCCorrectableHigh
+        expr: increase(node_memory_correctable_errors_total[1h]) > 10
+        for: 15m
+        labels:
+          severity: warning
+          component: hardware
+        annotations:
+          summary: "High rate of correctable ECC errors on {{ $labels.instance }}"
+          description: |
+            {{ $value }} correctable ECC errors in the past hour on {{ $labels.instance }}.
+            Correctable errors indicate degrading DIMM — schedule replacement.
+
+  - name: time_sync
+    rules:
+      - alert: ClockDrift
+        expr: abs(node_timex_offset_seconds) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: cluster
+        annotations:
+          summary: "Clock drift on {{ $labels.instance }}"
+          description: |
+            NTP offset is {{ $value | humanizeDuration }} on {{ $labels.instance }}.
+            Corosync may misbehave if drift exceeds safe bounds (token timeout: 4000ms).
+            Check: chronyc tracking
+
+      - alert: NTPNotSynchronized
+        expr: node_timex_sync_status != 1
+        for: 5m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "NTP not synchronized on {{ $labels.instance }}"
+          description: |
+            NTP is not synchronized on {{ $labels.instance }}.
+            Corosync cluster membership depends on synchronized clocks.
+            Check: systemctl status chronyd && chronyc sources
+
   # =========================================================================
   # Alertmanager Inhibit Rules (add to alertmanager.yml)
   # =========================================================================

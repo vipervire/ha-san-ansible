@@ -55,3 +55,30 @@
       - cockpit-navigator       # File browser
     state: present
   ignore_errors: true  # repo may not have packages for your arch/release
+
+# ─── Custom TLS certificate for Cockpit (optional) ────────────────────────
+# By default Cockpit generates a self-signed cert. Set cockpit_tls_cert_file
+# and cockpit_tls_key_file to deploy a custom cert (e.g. from internal CA).
+# For production, consider placing Cockpit behind a reverse proxy instead.
+- name: Create Cockpit TLS cert directory
+  ansible.builtin.file:
+    path: /etc/cockpit/ws-certs.d
+    state: directory
+    mode: "0700"
+  when: cockpit_tls_cert_file is defined and cockpit_tls_key_file is defined
+
+- name: Deploy custom Cockpit TLS certificate
+  ansible.builtin.copy:
+    src: "{{ cockpit_tls_cert_file }}"
+    dest: /etc/cockpit/ws-certs.d/10-custom.crt
+    mode: "0644"
+  when: cockpit_tls_cert_file is defined
+  notify: restart cockpit
+
+- name: Deploy custom Cockpit TLS key
+  ansible.builtin.copy:
+    src: "{{ cockpit_tls_key_file }}"
+    dest: /etc/cockpit/ws-certs.d/10-custom.key
+    mode: "0600"
+  when: cockpit_tls_key_file is defined
+  notify: restart cockpit

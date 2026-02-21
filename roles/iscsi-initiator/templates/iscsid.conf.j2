@@ -34,5 +34,6 @@ node.session.err_timeo.lu_reset_timeout = 30
 node.session.err_timeo.tgt_reset_timeout = 30
 
 # ─── Performance ────────────────────────────────────────────────────────────
-node.session.cmds_max = 128
-node.session.queue_depth = 32
+# Queue depth: SATA SSD: 32-64, NVMe-backed storage: 64-128
+node.session.cmds_max = {{ iscsi_cmds_max | default(128) }}
+node.session.queue_depth = {{ iscsi_queue_depth | default(32) }}

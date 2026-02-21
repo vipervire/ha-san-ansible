@@ -1,0 +1,6 @@
+---
+# roles/pacemaker/defaults/main.yml — Pacemaker role defaults
+
+pacemaker_preferred_node: "storage-a"   # soft preference (not a hard pin)
+pacemaker_resource_stickiness: 200       # prefer staying on current node
+pacemaker_standby_drain_seconds: 15      # wait for resource migration before stopping

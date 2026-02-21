@@ -10,8 +10,12 @@ vers3 = {{ 'y' if nfs_v3_enabled else 'n' }}
 vers4 = {{ 'y' if nfs_v4_enabled else 'n' }}
 vers4.1 = {{ 'y' if nfs_v41_enabled else 'n' }}
 # NFSv4 read delegations — clients cache file data locally for lower latency
-# On failover, clients re-establish delegations during the NFS grace period (~90s)
+# On failover, clients re-establish delegations during the NFS grace period
 delegation = y
+# Grace period: time (seconds) for clients to reclaim locks after server restart/failover
+grace-time = {{ nfs_grace_time | default(90) }}
+# Lease time: how long clients hold delegations before renewal required
+lease-time = {{ nfs_lease_time | default(90) }}
 
 [mountd]
 port = 20048

@@ -98,3 +98,56 @@ ssh_port: 22
 admin_user: storageadmin
 # Place your public key here or load from file
 admin_ssh_pubkey: "ssh-ed25519 AAAA... your-key-here"
+
+# ---------------------------------------------------------------------------
+# Security — optional hardening features
+# ---------------------------------------------------------------------------
+# auditd — monitors sensitive config files and privilege escalation
+auditd_enabled: false
+
+# Remote syslog forwarding (rsyslog)
+syslog_remote_enabled: false
+# syslog_remote_host: "10.20.20.100"
+# syslog_remote_port: 514
+# syslog_remote_protocol: "udp"   # or "tcp"
+
+# Hardware watchdog — reboots node if OS hangs
+watchdog_enabled: false
+# watchdog_device: "/dev/watchdog"
+# watchdog_timeout: 60
+# watchdog_interval: 10
+# watchdog_max_load: 24.0
+# watchdog_min_memory: 1
+
+# Rate limiting for Cockpit (9090) and pcsd (2224) — brute-force protection
+firewall_rate_limit_enabled: true
+
+# NFSv3 ports in firewall (111/tcp+udp, 20048) — only needed if nfs_v3_enabled: true
+# (mirrored from services role; set both consistently)
+nfs_v3_enabled: false
+
+# ---------------------------------------------------------------------------
+# Monitoring — disk health and ECC memory
+# ---------------------------------------------------------------------------
+smart_monitoring_enabled: true     # SMART disk health exporter (storage nodes only)
+ras_monitoring_enabled: false      # ECC memory monitoring via rasdaemon (not all hardware has ECC)
+
+# Alertmanager ntfy integration config — set URL to enable alertmanager.yml generation
+alertmanager_ntfy_url: ""
+
+# ---------------------------------------------------------------------------
+# Monitoring — node_exporter TLS (optional)
+# ---------------------------------------------------------------------------
+node_exporter_tls_enabled: false
+# node_exporter_cert_file: /etc/ssl/certs/node-exporter.crt
+# node_exporter_key_file: /etc/ssl/private/node-exporter.key
+# node_exporter_basic_auth_users:
+#   prometheus: "$2b$12$..."   # bcrypt hash
+
+# ---------------------------------------------------------------------------
+# Cockpit — custom TLS certificate (optional)
+# ---------------------------------------------------------------------------
+# By default Cockpit uses a self-signed cert. Provide paths to deploy your own.
+# Paths are on the Ansible controller (src:), not the target node.
+# cockpit_tls_cert_file: "/path/on/ansible/controller/cert.pem"
+# cockpit_tls_key_file:  "/path/on/ansible/controller/key.pem"

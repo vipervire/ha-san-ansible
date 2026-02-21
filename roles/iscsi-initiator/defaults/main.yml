@@ -1,0 +1,13 @@
+---
+# roles/iscsi-initiator/defaults/main.yml — iSCSI initiator role defaults
+
+# Aggressive-safe timeout profile for HA ZFS-over-iSCSI
+iscsi_replacement_timeout: 5     # seconds before dead LUN is faulted
+iscsi_noop_out_interval: 2
+iscsi_noop_out_timeout: 2
+iscsi_login_timeout: 10
+
+# Queue depth — tune for storage device type
+# SATA SSD: 32-64, NVMe-backed: 64-128
+iscsi_queue_depth: 32
+iscsi_cmds_max: 128

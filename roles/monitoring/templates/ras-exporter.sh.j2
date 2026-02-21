@@ -1,0 +1,35 @@
+#!/bin/bash
+# Managed by Ansible — RAS (ECC memory) metrics exporter
+# Queries rasdaemon's event database and exports correctable/uncorrectable counts.
+# Requires: rasdaemon (installed and running)
+
+set -euo pipefail
+
+OUTFILE="/var/lib/prometheus/node-exporter/ras.prom"
+TMPFILE="${OUTFILE}.tmp"
+
+{
+  echo "# HELP node_memory_correctable_errors_total Total correctable ECC memory errors"
+  echo "# TYPE node_memory_correctable_errors_total counter"
+  echo "# HELP node_memory_uncorrectable_errors_total Total uncorrectable ECC memory errors"
+  echo "# TYPE node_memory_uncorrectable_errors_total counter"
+
+  CE_COUNT=0
+  UE_COUNT=0
+
+  if command -v ras-mc-ctl &>/dev/null; then
+    RAS_OUTPUT=$(ras-mc-ctl --errors 2>/dev/null || true)
+
+    if [[ -n "${RAS_OUTPUT}" ]]; then
+      # Parse CE (correctable) events
+      CE_COUNT=$(echo "${RAS_OUTPUT}" | grep -c "CE$\|Correctable\|correctable" 2>/dev/null || echo 0)
+      # Parse UE (uncorrectable) events
+      UE_COUNT=$(echo "${RAS_OUTPUT}" | grep -c "UE$\|Uncorrectable\|uncorrectable" 2>/dev/null || echo 0)
+    fi
+  fi
+
+  echo "node_memory_correctable_errors_total ${CE_COUNT}"
+  echo "node_memory_uncorrectable_errors_total ${UE_COUNT}"
+} > "${TMPFILE}"
+
+mv "${TMPFILE}" "${OUTFILE}"

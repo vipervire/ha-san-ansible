@@ -1,0 +1,14 @@
+# Managed by Ansible — remote syslog forwarding
+# Forward selected facilities to central syslog server
+
+if $syslogfacility-text == 'auth' or
+   $syslogfacility-text == 'authpriv' or
+   $syslogfacility-text == 'daemon' or
+   $syslogfacility-text == 'kern' then {
+{% if syslog_remote_protocol | default('udp') == 'tcp' %}
+  action(type="omfwd" Target="{{ syslog_remote_host }}" Port="{{ syslog_remote_port | default(514) }}" Protocol="tcp")
+{% else %}
+  action(type="omfwd" Target="{{ syslog_remote_host }}" Port="{{ syslog_remote_port | default(514) }}" Protocol="udp")
+{% endif %}
+  stop
+}

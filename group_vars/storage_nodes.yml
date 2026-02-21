@@ -245,6 +245,44 @@ sanoid_templates:
     autoprune: true
 
 # ---------------------------------------------------------------------------
+# ZED event → ntfy push notifications
+# ---------------------------------------------------------------------------
+zed_ntfy_enabled: false
+zed_ntfy_url: "http://ntfy.example.com"    # base URL of your ntfy server
+zed_ntfy_topic: "/ha-san-alerts"
+
+# ---------------------------------------------------------------------------
+# Syncoid offsite ZFS replication (requires sanoid_install: true)
+# ---------------------------------------------------------------------------
+syncoid_enabled: false
+syncoid_schedule: "*-*-* 03:00:00"
+syncoid_targets: []
+# Example:
+# syncoid_targets:
+#   - source: "san-pool/nfs"
+#     destination: "backup@remote-host:backup-pool/san-pool-nfs"
+
+# ---------------------------------------------------------------------------
+# iSCSI — Client-facing target optional CHAP
+# ---------------------------------------------------------------------------
+iscsi_client_chap_enabled: false
+iscsi_client_chap_user: ""
+iscsi_client_chap_password: ""      # vault this if enabled
+
+# ---------------------------------------------------------------------------
+# NFS grace period (seconds) — time for clients to reclaim locks after failover
+# ---------------------------------------------------------------------------
+nfs_grace_time: 45      # Reduced from 90s default for faster client reconnect
+nfs_lease_time: 45      # Keep in sync with grace_time
+
+# ---------------------------------------------------------------------------
+# iSCSI queue depth and command limit (tune for storage device type)
+# ---------------------------------------------------------------------------
+# SATA SSD: 32-64, NVMe-backed storage: 64-128
+iscsi_queue_depth: 32
+iscsi_cmds_max: 128
+
+# ---------------------------------------------------------------------------
 # TCP / Network tuning for 40GbE iSCSI
 # ---------------------------------------------------------------------------
 tcp_tunables:
@@ -252,3 +290,5 @@ tcp_tunables:
   net.core.wmem_max: 16777216
   net.ipv4.tcp_rmem: "4096 87380 16777216"
   net.ipv4.tcp_wmem: "4096 65536 16777216"
+  net.ipv4.tcp_congestion_control: bbr    # Requires tcp_bbr module (loaded by hardening role)
+  net.core.default_qdisc: fq             # Required for BBR to work optimally

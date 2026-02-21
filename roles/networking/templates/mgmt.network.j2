@@ -1,0 +1,11 @@
+# Managed by Ansible — management interface configuration
+# Management VLAN: Corosync ring0, SSH, IPMI, Cockpit
+[Match]
+Name={{ net_mgmt_interface }}
+
+[Network]
+Address={{ mgmt_ip }}/{{ vlans.management.subnet.split('/')[1] }}
+VLAN=mgmt-vlan
+
+[Link]
+MTUBytes={{ vlans.management.mtu | default(1500) }}

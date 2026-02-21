@@ -1,0 +1,22 @@
+---
+# roles/monitoring/defaults/main.yml — Monitoring role defaults
+
+# Cluster metrics (Pacemaker/Corosync via ha_cluster_exporter)
+ha_cluster_monitoring_enabled: true
+
+# ZFS scrub metrics (textfile exporter via node_exporter)
+zfs_scrub_monitoring_enabled: true
+
+# SMART disk health monitoring (storage nodes only)
+smart_monitoring_enabled: true
+
+# ECC memory monitoring via rasdaemon (not all hardware has ECC)
+ras_monitoring_enabled: false
+
+# node_exporter TLS (opt-in)
+node_exporter_tls_enabled: false
+# node_exporter_cert_file: /etc/ssl/certs/node-exporter.crt
+# node_exporter_key_file: /etc/ssl/private/node-exporter.key
+
+# Alertmanager ntfy integration — set URL to generate alertmanager.yml
+alertmanager_ntfy_url: ""

@@ -1,0 +1,11 @@
+# Managed by Ansible — Syncoid ZFS snapshot replication timer
+[Unit]
+Description=Syncoid replication timer
+
+[Timer]
+OnCalendar={{ syncoid_schedule | default('*-*-* 03:00:00') }}
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

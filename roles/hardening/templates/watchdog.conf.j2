@@ -1,0 +1,7 @@
+# Managed by Ansible — hardware watchdog configuration
+watchdog-device = {{ watchdog_device | default('/dev/watchdog') }}
+watchdog-timeout = {{ watchdog_timeout | default(60) }}
+interval = {{ watchdog_interval | default(10) }}
+log-dir = /var/log/watchdog
+max-load-1 = {{ watchdog_max_load | default(24.0) }}
+min-memory = {{ watchdog_min_memory | default(1) }}

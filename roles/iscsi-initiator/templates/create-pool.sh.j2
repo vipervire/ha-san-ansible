@@ -23,14 +23,46 @@ LOCAL_DISKS=(
 {% endfor %}
 )
 
-# ─── Remote iSCSI disks — UPDATE THESE WITH ACTUAL by-path PATHS ───────────
-# Run: ls -la /dev/disk/by-path/ | grep iscsi | sort
-# Example: ip-10.10.10.2:3260-iscsi-iqn.2025-01.lab.home:storage-b-lun-0
-REMOTE_DISKS=(
+{% if slog_disk is defined %}
+# ─── SLOG device (NVMe write log accelerator) ────────────────────────────────
+LOCAL_SLOG="{{ slog_disk.device }}"
+REMOTE_SLOG="FIXME:replace-with-iscsi-by-path-for-slog"
+{% endif %}
+
+{% if special_disk is defined %}
+# ─── Special vdev (metadata/small-block accelerator) ─────────────────────────
+LOCAL_SPECIAL="{{ special_disk.device }}"
+REMOTE_SPECIAL="FIXME:replace-with-iscsi-by-path-for-special"
+{% endif %}
+
+# ─── Auto-discover remote iSCSI disk paths ───────────────────────────────────
+echo "=== Attempting auto-discovery of iSCSI device paths ==="
+REMOTE_DISKS=()
+ISCSI_PATHS=()
+
+if iscsiadm -m session &>/dev/null 2>&1; then
+  mapfile -t ISCSI_PATHS < <(
+    ls -la /dev/disk/by-path/ 2>/dev/null |
+    grep "ip-{{ iscsi_peer_ip }}:3260" |
+    awk '{print "/dev/disk/by-path/" $9}' |
+    grep -v 'part' |
+    sort
+  )
+fi
+
+if [[ ${#ISCSI_PATHS[@]} -ge ${#LOCAL_DISKS[@]} ]]; then
+  echo "Auto-discovered ${#ISCSI_PATHS[@]} remote iSCSI paths:"
+  for i in "${!ISCSI_PATHS[@]}"; do
+    echo "  LUN $i: ${ISCSI_PATHS[$i]}"
+    REMOTE_DISKS+=("${ISCSI_PATHS[$i]}")
+  done
+else
+  echo "Auto-discovery found ${#ISCSI_PATHS[@]} paths (need ${#LOCAL_DISKS[@]})."
+  echo "Falling back to FIXME placeholders — EDIT BEFORE RUNNING:"
 {% for disk in local_data_disks %}
-  "FIXME:replace-with-iscsi-by-path-for-lun{{ loop.index0 }}"
+  REMOTE_DISKS+=("FIXME:replace-with-iscsi-by-path-for-lun{{ loop.index0 }}")
 {% endfor %}
-)
+fi
 
 # ─── Verify disks exist ────────────────────────────────────────────────────
 echo "=== Verifying disk paths ==="
@@ -78,7 +110,24 @@ for i in "${!LOCAL_DISKS[@]}"; do
   fi
 done
 
+# ─── Optional vdevs (SLOG + special) ─────────────────────────────────────────
+OPTIONAL_VDEVS=""
+{% if slog_disk is defined %}
+if [[ "${LOCAL_SLOG}" != "" && "${REMOTE_SLOG}" != FIXME* ]]; then
+  OPTIONAL_VDEVS+=" log mirror ${LOCAL_SLOG} ${REMOTE_SLOG}"
+elif [[ "${LOCAL_SLOG}" != "" ]]; then
+  echo "WARNING: Remote SLOG path not set. SLOG will NOT be added."
+  echo "         Edit REMOTE_SLOG above and re-run to add mirrored SLOG."
+fi
+{% endif %}
+{% if special_disk is defined %}
+if [[ "${LOCAL_SPECIAL}" != "" && "${REMOTE_SPECIAL}" != FIXME* ]]; then
+  OPTIONAL_VDEVS+=" special mirror ${LOCAL_SPECIAL} ${REMOTE_SPECIAL}"
+fi
+{% endif %}
+
 set -x
+# shellcheck disable=SC2086
 zpool create \
   -o multihost=on \
   -o ashift={{ zfs_pool_ashift }} \
@@ -89,7 +138,8 @@ zpool create \
   -O {{ key }}={{ value }} \
 {% endfor %}
   "$POOL" \
-$MIRROR_ARGS
+$MIRROR_ARGS \
+$OPTIONAL_VDEVS
 set +x
 
 echo ""

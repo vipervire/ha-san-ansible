@@ -1,0 +1,9 @@
+---
+# roles/cockpit/defaults/main.yml — Cockpit role defaults
+
+# Custom TLS certificate (opt-in)
+# Provide paths on the Ansible controller to deploy a custom cert.
+# By default Cockpit uses a self-signed certificate.
+# For production, consider placing Cockpit behind a reverse proxy instead.
+# cockpit_tls_cert_file: ""  # path to .crt on ansible controller
+# cockpit_tls_key_file: ""   # path to .key on ansible controller

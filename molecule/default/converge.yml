@@ -1,0 +1,15 @@
+---
+# molecule/default/converge.yml — Apply roles that are safe to test in Docker
+# ZFS, iSCSI, Pacemaker, and storage-specific roles are excluded (require real hardware)
+
+- name: Converge
+  hosts: all
+  become: true
+  pre_tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+  roles:
+    - common
+    - hardening

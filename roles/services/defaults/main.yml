@@ -1,0 +1,22 @@
+---
+# roles/services/defaults/main.yml — Services role defaults (NFS, SMB, iSCSI client target)
+
+# NFS version support
+nfs_v3_enabled: false     # NFSv3 disabled by default (NFSv4-only is more secure)
+nfs_v4_enabled: true
+nfs_v41_enabled: true
+nfs_threads: 8
+
+# NFS grace/lease periods (seconds) — time for clients to reclaim after failover
+nfs_grace_time: 45
+nfs_lease_time: 45
+
+# Samba
+smb_min_protocol: "SMB3"
+smb_signing: "required"
+smb_encrypt: "required"
+
+# Client-facing iSCSI target CHAP (opt-in)
+iscsi_client_chap_enabled: false
+iscsi_client_chap_user: ""
+iscsi_client_chap_password: ""

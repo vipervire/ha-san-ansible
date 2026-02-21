@@ -22,8 +22,11 @@ table inet filter {
     ip saddr {{ vlans.storage.subnet }} tcp dport 3260 accept
 
     # ─── Client VLAN ({{ vlans.client.id }}) — NFS, SMB, iSCSI ─────────
-    ip saddr {{ vlans.client.subnet }} tcp dport { 2049, 20048, 445, 3260, 111 } accept
+    ip saddr {{ vlans.client.subnet }} tcp dport { 2049, 3260, 445 } accept
+{% if nfs_v3_enabled | default(false) %}
+    ip saddr {{ vlans.client.subnet }} tcp dport { 20048, 111 } accept
     ip saddr {{ vlans.client.subnet }} udp dport 111 accept
+{% endif %}
 {% endif %}
 
     # ─── Management VLAN ({{ vlans.management.id }}) ────────────────────
@@ -33,17 +36,34 @@ table inet filter {
     # Corosync (knet)
     ip saddr {{ vlans.management.subnet }} udp dport 5405 accept
 
-    # pcsd (Pacemaker web)
+    # pcsd (Pacemaker web) — rate limited to protect against brute-force
+{% if firewall_rate_limit_enabled | default(true) %}
+    ip saddr {{ vlans.management.subnet }} tcp dport 2224 ct state new limit rate 10/minute burst 30 packets accept
+{% else %}
     ip saddr {{ vlans.management.subnet }} tcp dport 2224 accept
+{% endif %}
 
-    # Cockpit web UI
+    # Cockpit web UI — rate limited to protect against brute-force
+{% if firewall_rate_limit_enabled | default(true) %}
+    ip saddr {{ vlans.management.subnet }} tcp dport 9090 ct state new limit rate 10/minute burst 30 packets accept
+{% else %}
     ip saddr {{ vlans.management.subnet }} tcp dport 9090 accept
+{% endif %}
 
     # Prometheus node_exporter
     ip saddr {{ vlans.management.subnet }} tcp dport 9100 accept
 
     # Prometheus ha_cluster_exporter (Pacemaker/Corosync metrics)
     ip saddr {{ vlans.management.subnet }} tcp dport 9664 accept
+
+{% if syslog_remote_enabled | default(false) %}
+    # Remote syslog receiver
+{% if syslog_remote_protocol | default('udp') == 'tcp' %}
+    ip saddr {{ vlans.management.subnet }} tcp dport {{ syslog_remote_port | default(514) }} accept
+{% else %}
+    ip saddr {{ vlans.management.subnet }} udp dport {{ syslog_remote_port | default(514) }} accept
+{% endif %}
+{% endif %}
 
 {% if inventory_hostname in groups['storage_nodes'] %}
     # Corosync on storage VLAN (ring1 redundancy)

@@ -1,0 +1,11 @@
+# Managed by Ansible — SMART disk health metrics exporter timer
+[Unit]
+Description=Run SMART disk health metrics exporter every 30 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

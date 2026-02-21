@@ -1,0 +1,82 @@
+# Managed by Ansible — Alertmanager configuration for ntfy integration
+# Generated on {{ inventory_hostname }} for cluster {{ cluster_name }}
+#
+# Deploy to your Prometheus server's Alertmanager instance.
+# Path: /etc/alertmanager/alertmanager.yml
+#
+# After deploying: systemctl reload alertmanager
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: "ntfy-default"
+  group_by: ['alertname', 'instance']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # Critical alerts — high priority ntfy
+    - matchers:
+        - severity = "critical"
+      receiver: "ntfy-critical"
+      repeat_interval: 1h
+
+    # Warning alerts — default priority ntfy
+    - matchers:
+        - severity = "warning"
+      receiver: "ntfy-warning"
+      repeat_interval: 4h
+
+    # Watchdog (always firing) — separate receiver, no repeat spam
+    - matchers:
+        - alertname = "Watchdog"
+      receiver: "ntfy-watchdog"
+      repeat_interval: 12h
+
+receivers:
+  - name: "ntfy-critical"
+    webhook_configs:
+      - url: "{{ alertmanager_ntfy_url }}/ha-san-alerts"
+        http_config:
+          follow_redirects: true
+        send_resolved: true
+        max_alerts: 5
+
+  - name: "ntfy-warning"
+    webhook_configs:
+      - url: "{{ alertmanager_ntfy_url }}/ha-san-alerts"
+        http_config:
+          follow_redirects: true
+        send_resolved: true
+        max_alerts: 5
+
+  - name: "ntfy-default"
+    webhook_configs:
+      - url: "{{ alertmanager_ntfy_url }}/ha-san-alerts"
+        http_config:
+          follow_redirects: true
+        send_resolved: true
+
+  - name: "ntfy-watchdog"
+    webhook_configs:
+      - url: "{{ alertmanager_ntfy_url }}/ha-san-watchdog"
+        http_config:
+          follow_redirects: true
+        send_resolved: false
+
+inhibit_rules:
+  # Suppress warnings when a critical alert fires for the same resource
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ['alertname', 'instance']
+
+  # Suppress resource alerts when a cluster node is offline
+  - source_matchers:
+      - alertname = "ClusterNodeOffline"
+    target_matchers:
+      - alertname =~ "ZFSPool.*|Service.*Down|NFSServer.*|SMBServer.*"
+    equal: ['instance']

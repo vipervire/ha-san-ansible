@@ -1,0 +1,18 @@
+# Managed by Ansible — SMART disk health metrics exporter service
+[Unit]
+Description=SMART disk health metrics exporter
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/smart-exporter
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=smart-exporter
+
+# SMART requires raw device access — runs as root
+# Security hardening where possible
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ReadWritePaths=/var/lib/prometheus/node-exporter

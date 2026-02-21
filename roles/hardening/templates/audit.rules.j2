@@ -1,0 +1,31 @@
+## Managed by Ansible — ha-san audit rules
+## Monitors credential files, cluster config changes, and privilege escalation
+
+# Delete all existing rules
+-D
+
+# Increase the buffers to survive stress events
+-b 8192
+
+# Monitor sensitive configuration files
+-w /etc/corosync/ -p wa -k corosync_config
+-w /etc/pacemaker/ -p wa -k pacemaker_config
+-w /etc/target/saveconfig.json -p wa -k iscsi_target_config
+-w /etc/iscsi/iscsid.conf -p wa -k iscsi_initiator_config
+-w /etc/ssh/sshd_config -p wa -k sshd_config
+-w /etc/ssh/sshd_config.d/ -p wa -k sshd_config
+-w /etc/sudoers -p wa -k sudoers
+-w /etc/sudoers.d/ -p wa -k sudoers
+
+# Monitor privilege escalation
+-a always,exit -F arch=b64 -S execve -F euid=0 -F auid!=0 -k privilege_escalation
+-w /bin/su -p x -k su_execution
+-w /usr/bin/sudo -p x -k sudo_execution
+
+# Monitor user and group management
+-w /etc/passwd -p wa -k user_management
+-w /etc/shadow -p wa -k shadow_management
+-w /etc/group -p wa -k group_management
+
+# Make the configuration immutable (requires reboot to change)
+-e 2

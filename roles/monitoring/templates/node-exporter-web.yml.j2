@@ -1,0 +1,10 @@
+# Managed by Ansible — node_exporter TLS web config
+tls_server_config:
+  cert_file: {{ node_exporter_cert_file | default('/etc/ssl/certs/node-exporter.crt') }}
+  key_file: {{ node_exporter_key_file | default('/etc/ssl/private/node-exporter.key') }}
+{% if node_exporter_basic_auth_users is defined %}
+basic_auth_users:
+{% for user, hash in node_exporter_basic_auth_users.items() %}
+  {{ user }}: "{{ hash }}"
+{% endfor %}
+{% endif %}

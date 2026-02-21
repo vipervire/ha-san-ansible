@@ -1,0 +1,81 @@
+---
+dependency:
+  name: galaxy
+
+driver:
+  name: docker
+
+platforms:
+  - name: storage-a
+    image: geerlingguy/docker-debian12-ansible:latest
+    pre_build_image: true
+    privileged: true    # needed for sysctl and nftables
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    groups:
+      - cluster
+      - storage_nodes
+
+  - name: quorum
+    image: geerlingguy/docker-debian12-ansible:latest
+    pre_build_image: true
+    privileged: true
+    command: /lib/systemd/systemd
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    groups:
+      - cluster
+      - quorum_node
+
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        cluster_name: test-cluster
+        hacluster_password: "testpass-molecule-only"
+        iscsi_chap_password: "testpass-molecule-only"
+        iscsi_mutual_chap_password: "testpass2-molecule-only"
+        admin_user: storageadmin
+        admin_ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForMolecule test@molecule"
+        mgmt_ip: "{{ ansible_default_ipv4.address }}"
+        ssh_port: 22
+        ntp_servers:
+          - "0.debian.pool.ntp.org"
+        vlans:
+          management:
+            id: 20
+            subnet: "0.0.0.0/0"    # allow all in test
+            mtu: 1500
+          storage:
+            id: 10
+            subnet: "10.10.10.0/24"
+            mtu: 9000
+          client:
+            id: 30
+            subnet: "10.30.30.0/24"
+            mtu: 9000
+      storage_nodes:
+        storage_ip: "10.10.10.1"
+        client_ip: "10.30.30.1"
+        iscsi_iqn_prefix: "iqn.2025-01.test.molecule"
+        iscsi_target_iqn: "iqn.2025-01.test.molecule:storage-a"
+        iscsi_initiator_name: "iqn.2025-01.test.molecule:initiator-a"
+        iscsi_peer_ip: "10.10.10.2"
+        iscsi_peer_iqn: "iqn.2025-01.test.molecule:storage-b"
+        zfs_pool_name: "test-pool"
+        local_data_disks: []       # no disks in container tests
+        stonith_nodes:
+          storage-a:
+            method: "ipmi"
+            ip: "10.20.20.101"
+            user: "admin"
+            password: "testpass"
+        tcp_tunables:
+          net.core.rmem_max: 16777216
+
+verifier:
+  name: ansible

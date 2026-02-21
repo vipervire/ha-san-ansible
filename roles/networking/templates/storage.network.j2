@@ -1,0 +1,11 @@
+# Managed by Ansible — storage interface configuration
+# Storage VLAN: iSCSI replication between storage nodes (jumbo frames)
+[Match]
+Name={{ net_storage_parent }}
+
+[Network]
+Address={{ storage_ip }}/{{ vlans.storage.subnet.split('/')[1] }}
+VLAN=storage-vlan
+
+[Link]
+MTUBytes={{ vlans.storage.mtu | default(9000) }}

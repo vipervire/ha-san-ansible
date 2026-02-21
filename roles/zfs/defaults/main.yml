@@ -1,0 +1,35 @@
+---
+# roles/zfs/defaults/main.yml — ZFS role defaults
+
+zfs_pool_name: "san-pool"
+zfs_pool_ashift: 12              # 4K sector size (SSDs); use 13 for 8K
+zfs_pool_options:
+  multihost: "on"
+  autotrim: "on"
+  autoreplace: "on"
+zfs_dataset_options:
+  acltype: posixacl
+  compression: lz4
+  dnodesize: auto
+  xattr: sa
+  atime: "off"
+
+# Scrub automation
+zfs_scrub_enabled: true
+zfs_scrub_schedule: "*-*-01 02:00:00"
+zfs_scrub_randomized_delay_sec: 1800
+zfs_scrub_skip_on_degraded: true
+zfs_scrub_min_interval_days: 25
+
+# Sanoid snapshots
+sanoid_install: false            # opt-in
+
+# ZED event → ntfy (opt-in)
+zed_ntfy_enabled: false
+zed_ntfy_url: ""
+zed_ntfy_topic: "/ha-san-alerts"
+
+# Syncoid offsite replication (opt-in, requires sanoid_install: true)
+syncoid_enabled: false
+syncoid_schedule: "*-*-* 03:00:00"
+syncoid_targets: []

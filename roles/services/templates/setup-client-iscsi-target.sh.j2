@@ -1,0 +1,56 @@
+#!/bin/bash
+# Managed by Ansible — Client-facing LIO iSCSI target setup
+# This script is idempotent: safe to re-run. Pacemaker starts/stops the service;
+# LIO configuration is persistent across reboots via targetcli saveconfig.
+set -euo pipefail
+
+TARGET_IQN="{{ iscsi_client_iqn }}"
+BIND_IP="{{ iscsi_client_bind_ip | default(client_ip) }}"
+
+echo "=== Configuring client iSCSI target: ${TARGET_IQN} ==="
+
+# Check if target already exists
+if targetcli ls /iscsi/"${TARGET_IQN}" &>/dev/null 2>&1; then
+  echo "Target ${TARGET_IQN} already exists — updating ACLs only."
+  TARGET_EXISTS=true
+else
+  TARGET_EXISTS=false
+fi
+
+if [[ "${TARGET_EXISTS}" == "false" ]]; then
+  # Create the iSCSI target
+  targetcli /iscsi create "${TARGET_IQN}"
+
+  # Bind to client-facing IP only (remove default 0.0.0.0 portal)
+  targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals delete 0.0.0.0 3260 2>/dev/null || true
+  targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals create "${BIND_IP}" 3260
+fi
+
+{% if iscsi_client_chap_enabled | default(false) %}
+# Enable CHAP authentication
+targetcli /iscsi/"${TARGET_IQN}"/tpg1 set attribute authentication=1
+targetcli /iscsi/"${TARGET_IQN}"/tpg1 set attribute generate_node_acls=0
+
+{% for initiator_iqn in iscsi_client_acls %}
+# ACL for {{ initiator_iqn }}
+if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg1/acls/{{ initiator_iqn }} &>/dev/null 2>&1; then
+  targetcli /iscsi/"${TARGET_IQN}"/tpg1/acls create {{ initiator_iqn }}
+fi
+targetcli /iscsi/"${TARGET_IQN}"/tpg1/acls/{{ initiator_iqn }} \
+  set auth userid={{ iscsi_client_chap_user }} password={{ iscsi_client_chap_password }}
+{% endfor %}
+{% else %}
+# ACL-only mode (no CHAP — initiator IQN must match to connect)
+targetcli /iscsi/"${TARGET_IQN}"/tpg1 set attribute authentication=0
+targetcli /iscsi/"${TARGET_IQN}"/tpg1 set attribute generate_node_acls=0
+
+{% for initiator_iqn in iscsi_client_acls %}
+# ACL for {{ initiator_iqn }}
+if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg1/acls/{{ initiator_iqn }} &>/dev/null 2>&1; then
+  targetcli /iscsi/"${TARGET_IQN}"/tpg1/acls create {{ initiator_iqn }}
+fi
+{% endfor %}
+{% endif %}
+
+targetcli saveconfig
+echo "=== Client iSCSI target configured successfully ==="

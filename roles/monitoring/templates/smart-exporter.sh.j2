@@ -1,0 +1,109 @@
+#!/bin/bash
+# Managed by Ansible — SMART disk health metrics exporter
+# Writes Prometheus textfile metrics for node_exporter to collect.
+# Requires: smartmontools >= 7.0 (ships with Debian 12)
+
+set -euo pipefail
+
+OUTFILE="/var/lib/prometheus/node-exporter/smart.prom"
+TMPFILE="${OUTFILE}.tmp"
+
+# Disks to monitor (embedded at deploy time from local_data_disks)
+DISKS=(
+{% for disk in local_data_disks %}
+  "{{ disk.device }}"
+{% endfor %}
+)
+
+{
+  echo "# HELP node_disk_smart_healthy SMART overall health: 1=PASSED, 0=FAILED"
+  echo "# TYPE node_disk_smart_healthy gauge"
+  echo "# HELP node_disk_smart_temperature_celsius Drive temperature in Celsius"
+  echo "# TYPE node_disk_smart_temperature_celsius gauge"
+  echo "# HELP node_disk_smart_reallocated_sectors_total SMART reallocated sectors count (SATA)"
+  echo "# TYPE node_disk_smart_reallocated_sectors_total counter"
+  echo "# HELP node_disk_smart_power_on_hours_total Power-on hours"
+  echo "# TYPE node_disk_smart_power_on_hours_total counter"
+  echo "# HELP node_disk_nvme_available_spare_percent NVMe available spare percentage"
+  echo "# TYPE node_disk_nvme_available_spare_percent gauge"
+  echo "# HELP node_disk_nvme_percentage_used NVMe endurance percentage used"
+  echo "# TYPE node_disk_nvme_percentage_used gauge"
+
+  for DISK in "${DISKS[@]}"; do
+    # Resolve symlink to real device for smartctl
+    REAL_DEV=$(readlink -f "${DISK}" 2>/dev/null || echo "${DISK}")
+    SHORT_DEV=$(basename "${REAL_DEV}")
+
+    # Get SMART data as JSON (smartmontools 7.0+)
+    SMART_JSON=$(smartctl --json=c -H -A -i "${REAL_DEV}" 2>/dev/null || true)
+
+    if [[ -z "${SMART_JSON}" ]]; then
+      echo "node_disk_smart_healthy{device=\"${SHORT_DEV}\",serial=\"unknown\"} 0"
+      continue
+    fi
+
+    SERIAL=$(echo "${SMART_JSON}" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('serial_number', 'unknown'))
+" 2>/dev/null || echo "unknown")
+
+    LABELS="device=\"${SHORT_DEV}\",serial=\"${SERIAL}\""
+
+    # Health: passed=1, anything else=0
+    HEALTH=$(echo "${SMART_JSON}" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+status = d.get('smart_status', {}).get('passed', False)
+print(1 if status else 0)
+" 2>/dev/null || echo "0")
+    echo "node_disk_smart_healthy{${LABELS}} ${HEALTH}"
+
+    # Detect drive type
+    DRIVE_TYPE=$(echo "${SMART_JSON}" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('device', {}).get('type', 'unknown'))
+" 2>/dev/null || echo "unknown")
+
+    if [[ "${DRIVE_TYPE}" == "nvme" ]]; then
+      # NVMe-specific attributes
+      echo "${SMART_JSON}" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+nvme = d.get('nvme_smart_health_information_log', {})
+temp = nvme.get('temperature', 0)
+spare = nvme.get('available_spare', 0)
+used = nvme.get('percentage_used', 0)
+poh = nvme.get('power_on_hours', 0)
+labels = '${LABELS}'
+print(f'node_disk_smart_temperature_celsius{{{labels}}} {temp}')
+print(f'node_disk_nvme_available_spare_percent{{{labels}}} {spare}')
+print(f'node_disk_nvme_percentage_used{{{labels}}} {used}')
+print(f'node_disk_smart_power_on_hours_total{{{labels}}} {poh}')
+" 2>/dev/null || true
+    else
+      # SATA/SAS attributes — parse ata_smart_attributes array
+      echo "${SMART_JSON}" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+attrs = {a['name']: a.get('raw', {}).get('value', 0)
+         for a in d.get('ata_smart_attributes', {}).get('table', [])}
+temp_keys = ['Temperature_Celsius', 'Airflow_Temperature_Cel', 'Drive_Temperature']
+temp = next((attrs[k] for k in temp_keys if k in attrs), None)
+realloc = attrs.get('Reallocated_Sector_Ct', 0)
+poh = attrs.get('Power_On_Hours', 0)
+# Temperature may encode min/max in upper bytes; mask to lower byte
+if temp is not None:
+    temp = temp & 0xFF
+labels = '${LABELS}'
+if temp is not None:
+    print(f'node_disk_smart_temperature_celsius{{{labels}}} {temp}')
+print(f'node_disk_smart_reallocated_sectors_total{{{labels}}} {realloc}')
+print(f'node_disk_smart_power_on_hours_total{{{labels}}} {poh}')
+" 2>/dev/null || true
+    fi
+  done
+} > "${TMPFILE}"
+
+mv "${TMPFILE}" "${OUTFILE}"

@@ -1,0 +1,56 @@
+#!/bin/bash
+# Managed by Ansible — ZED event → ntfy push notification handler
+# Fires for significant pool events via immediate push (complements Prometheus polling).
+# ZED variables: https://openzfs.github.io/openzfs-docs/man/8/zed.8.html
+
+NTFY_URL="{{ zed_ntfy_url }}"
+NTFY_TOPIC="{{ zed_ntfy_topic | default('/ha-san-alerts') }}"
+HOSTNAME=$(hostname -s)
+POOL="${ZEVENT_POOL:-unknown}"
+CLASS="${ZEVENT_SUBCLASS:-${ZEVENT_CLASS:-unknown}}"
+
+case "${CLASS}" in
+  vdev_degrade)
+    TITLE="ZFS vdev degraded: ${POOL}"
+    BODY="Pool ${POOL} on ${HOSTNAME}: vdev degraded. Run: zpool status ${POOL}"
+    PRIORITY=high
+    TAGS="warning,hard-drive"
+    ;;
+  resilver_start)
+    TITLE="ZFS resilver started: ${POOL}"
+    BODY="Pool ${POOL} on ${HOSTNAME} began resilvering. Monitor: zpool status ${POOL}"
+    PRIORITY=default
+    TAGS="arrows_counterclockwise"
+    ;;
+  resilver_finish)
+    TITLE="ZFS resilver complete: ${POOL}"
+    BODY="Pool ${POOL} on ${HOSTNAME}: resilver finished. Verify: zpool status ${POOL}"
+    PRIORITY=default
+    TAGS="white_check_mark"
+    ;;
+  pool_import)
+    TITLE="ZFS pool imported: ${POOL}"
+    BODY="Pool ${POOL} imported on ${HOSTNAME} (likely active node after failover)."
+    PRIORITY=low
+    TAGS="inbox_tray"
+    ;;
+  pool_export)
+    TITLE="ZFS pool exported: ${POOL}"
+    BODY="Pool ${POOL} exported from ${HOSTNAME} (likely failover in progress)."
+    PRIORITY=low
+    TAGS="outbox_tray"
+    ;;
+  *)
+    # Ignore all other ZED events
+    exit 0
+    ;;
+esac
+
+# Send notification — never fail ZED event processing due to notification failure
+curl -s \
+  -H "Title: ${TITLE}" \
+  -H "Priority: ${PRIORITY}" \
+  -H "Tags: ${TAGS}" \
+  -d "${BODY}" \
+  "${NTFY_URL}${NTFY_TOPIC}" \
+  || true

@@ -1,0 +1,6 @@
+---
+- name: restart networkd
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    state: restarted
+  when: networking_restart_on_change | default(false)

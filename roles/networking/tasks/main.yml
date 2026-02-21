@@ -1,0 +1,48 @@
+---
+# roles/networking/tasks/main.yml — Optional network interface configuration
+# Only runs when networking_manage: true
+# Configures VLANs and MTU via systemd-networkd.
+#
+# WARNING: Enabling this on a running system may disrupt connectivity.
+#          Set networking_restart_on_change: true only during initial deployment.
+
+- name: Install systemd-networkd
+  ansible.builtin.apt:
+    name: systemd-networkd
+    state: present
+  when: networking_manage | default(false)
+
+- name: Deploy management interface config
+  ansible.builtin.template:
+    src: mgmt.network.j2
+    dest: /etc/systemd/network/10-mgmt.network
+    mode: "0644"
+  when: networking_manage | default(false)
+  notify: restart networkd
+
+- name: Deploy storage interface config
+  ansible.builtin.template:
+    src: storage.network.j2
+    dest: /etc/systemd/network/20-storage.network
+    mode: "0644"
+  when:
+    - networking_manage | default(false)
+    - inventory_hostname in groups['storage_nodes']
+  notify: restart networkd
+
+- name: Deploy client interface config
+  ansible.builtin.template:
+    src: client.network.j2
+    dest: /etc/systemd/network/30-client.network
+    mode: "0644"
+  when:
+    - networking_manage | default(false)
+    - inventory_hostname in groups['storage_nodes']
+  notify: restart networkd
+
+- name: Enable systemd-networkd
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    enabled: true
+    state: started
+  when: networking_manage | default(false)

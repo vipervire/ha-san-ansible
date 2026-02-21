@@ -151,3 +151,36 @@
     dest: /var/lib/samba/private
     state: link
     force: true
+
+# ─── Client-facing iSCSI target (Pacemaker-managed, optional ACLs + CHAP) ──
+- name: Install targetcli for client-facing iSCSI target
+  ansible.builtin.apt:
+    name:
+      - targetcli-fb
+      - python3-rtslib-fb
+    state: present
+  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
+
+- name: Generate client iSCSI target setup script
+  ansible.builtin.template:
+    src: setup-client-iscsi-target.sh.j2
+    dest: /root/setup-client-iscsi-target.sh
+    mode: "0700"
+  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
+
+- name: Check if client iSCSI target already configured
+  ansible.builtin.command:
+    cmd: targetcli ls /iscsi/{{ iscsi_client_iqn }}
+  register: client_lio_check
+  failed_when: false
+  changed_when: false
+  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
+
+- name: Run client LIO target setup (first time only)
+  ansible.builtin.command:
+    cmd: /root/setup-client-iscsi-target.sh
+  when:
+    - iscsi_client_acls is defined
+    - iscsi_client_acls | length > 0
+    - client_lio_check.rc is defined
+    - client_lio_check.rc != 0

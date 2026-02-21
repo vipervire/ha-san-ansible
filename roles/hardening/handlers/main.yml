@@ -12,3 +12,18 @@
   ansible.builtin.systemd:
     name: nftables
     state: restarted
+
+- name: restart auditd
+  ansible.builtin.systemd:
+    name: auditd
+    state: restarted
+
+- name: restart rsyslog
+  ansible.builtin.systemd:
+    name: rsyslog
+    state: restarted
+
+- name: restart watchdog
+  ansible.builtin.systemd:
+    name: watchdog
+    state: restarted

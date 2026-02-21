@@ -1,0 +1,25 @@
+---
+# roles/hardening/defaults/main.yml — Hardening role defaults
+
+ssh_port: 22
+ssh_allowed_users:
+  - storageadmin
+ssh_listen_addresses: []          # empty = all interfaces
+
+# Firewall
+firewall_rate_limit_enabled: true  # Rate limit Cockpit (9090) and pcsd (2224)
+nfs_v3_enabled: false              # Open NFSv3 firewall ports (111/tcp+udp, 20048)
+
+# Optional security features (all disabled by default)
+auditd_enabled: false
+syslog_remote_enabled: false
+# syslog_remote_host: ""
+# syslog_remote_port: 514
+# syslog_remote_protocol: "udp"
+
+watchdog_enabled: false
+# watchdog_device: "/dev/watchdog"
+# watchdog_timeout: 60
+# watchdog_interval: 10
+# watchdog_max_load: 24.0
+# watchdog_min_memory: 1

@@ -11,7 +11,26 @@
     dest: /etc/default/prometheus-node-exporter
     mode: "0644"
     content: |
-      ARGS="--web.listen-address={{ mgmt_ip | default('0.0.0.0') }}:9100 --collector.textfile.directory=/var/lib/prometheus/node-exporter"
+      ARGS="--web.listen-address={{ mgmt_ip | default('0.0.0.0') }}:9100 \
+        --collector.textfile.directory=/var/lib/prometheus/node-exporter \
+        {% if node_exporter_tls_enabled | default(false) %}--web.config.file=/etc/prometheus/node-exporter-web.yml{% endif %}"
+  notify: restart node_exporter
+
+- name: Create prometheus config directory
+  ansible.builtin.file:
+    path: /etc/prometheus
+    state: directory
+    mode: "0755"
+  when: node_exporter_tls_enabled | default(false)
+
+- name: Deploy node_exporter web config (TLS)
+  ansible.builtin.template:
+    src: node-exporter-web.yml.j2
+    dest: /etc/prometheus/node-exporter-web.yml
+    mode: "0640"
+    owner: root
+    group: prometheus
+  when: node_exporter_tls_enabled | default(false)
   notify: restart node_exporter
 
 - name: Create textfile collector directory
@@ -120,6 +139,89 @@
     daemon_reload: true
   when: inventory_hostname in groups['storage_nodes']
 
+# ─── SMART Disk Health Monitoring ─────────────────────────────────────────
+- name: Install smartmontools
+  ansible.builtin.apt:
+    name: smartmontools
+    state: present
+  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
+
+- name: Deploy SMART health exporter script
+  ansible.builtin.template:
+    src: smart-exporter.sh.j2
+    dest: /usr/local/bin/smart-exporter
+    mode: "0755"
+  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
+
+- name: Deploy SMART exporter systemd service
+  ansible.builtin.template:
+    src: smart-exporter.service.j2
+    dest: /etc/systemd/system/smart-exporter.service
+    mode: "0644"
+  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
+  notify: reload systemd
+
+- name: Deploy SMART exporter systemd timer
+  ansible.builtin.template:
+    src: smart-exporter.timer.j2
+    dest: /etc/systemd/system/smart-exporter.timer
+    mode: "0644"
+  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
+  notify: reload systemd
+
+- name: Enable SMART exporter timer
+  ansible.builtin.systemd:
+    name: smart-exporter.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
+
+# ─── Memory ECC / RAS Monitoring ───────────────────────────────────────────
+- name: Install rasdaemon
+  ansible.builtin.apt:
+    name: rasdaemon
+    state: present
+  when: ras_monitoring_enabled | default(false)
+
+- name: Enable rasdaemon service
+  ansible.builtin.systemd:
+    name: rasdaemon
+    enabled: true
+    state: started
+  when: ras_monitoring_enabled | default(false)
+
+- name: Deploy RAS (ECC) exporter script
+  ansible.builtin.template:
+    src: ras-exporter.sh.j2
+    dest: /usr/local/bin/ras-exporter
+    mode: "0755"
+  when: ras_monitoring_enabled | default(false)
+
+- name: Deploy RAS exporter systemd service
+  ansible.builtin.template:
+    src: ras-exporter.service.j2
+    dest: /etc/systemd/system/ras-exporter.service
+    mode: "0644"
+  when: ras_monitoring_enabled | default(false)
+  notify: reload systemd
+
+- name: Deploy RAS exporter systemd timer
+  ansible.builtin.template:
+    src: ras-exporter.timer.j2
+    dest: /etc/systemd/system/ras-exporter.timer
+    mode: "0644"
+  when: ras_monitoring_enabled | default(false)
+  notify: reload systemd
+
+- name: Enable RAS exporter timer
+  ansible.builtin.systemd:
+    name: ras-exporter.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: ras_monitoring_enabled | default(false)
+
 # ─── HA Cluster Exporter (Pacemaker/Corosync metrics) ──────────────────────
 - name: Install prometheus-hacluster-exporter
   ansible.builtin.apt:
@@ -141,3 +243,15 @@
     enabled: true
     state: started
   when: ha_cluster_monitoring_enabled | default(true)
+
+# ─── Alertmanager config generation (ntfy integration) ─────────────────────
+- name: Generate Alertmanager config for ntfy routing
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: /root/alertmanager-for-prometheus-server.yml
+    mode: "0640"
+  when: >
+    alertmanager_ntfy_url is defined and
+    alertmanager_ntfy_url | length > 0 and
+    inventory_hostname == pacemaker_preferred_node | default('storage-a')
+  run_once: true

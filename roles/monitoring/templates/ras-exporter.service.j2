@@ -1,0 +1,16 @@
+# Managed by Ansible — RAS (ECC memory) metrics exporter service
+[Unit]
+Description=RAS ECC memory metrics exporter
+After=rasdaemon.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ras-exporter
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ras-exporter
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/prometheus/node-exporter

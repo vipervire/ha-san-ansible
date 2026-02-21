@@ -1,0 +1,9 @@
+---
+# roles/networking/defaults/main.yml — Networking role defaults
+# This role is opt-in: set networking_manage: true to enable.
+# WARNING: enabling this on a running system can disrupt connectivity.
+# Review templates carefully before enabling networking_manage.
+
+networking_manage: false          # Master switch — does nothing if false
+networking_backend: systemd-networkd
+networking_restart_on_change: false  # Set true to allow interface restarts on change

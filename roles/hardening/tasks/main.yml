@@ -72,3 +72,72 @@
   loop:
     - net.ipv6.conf.all.disable_ipv6
     - net.ipv6.conf.default.disable_ipv6
+
+# ─── TCP BBR congestion control module ────────────────────────────────────
+- name: Load tcp_bbr kernel module
+  community.general.modprobe:
+    name: tcp_bbr
+    state: present
+    persistent: present
+  when: >
+    tcp_tunables is defined and
+    tcp_tunables.get('net.ipv4.tcp_congestion_control', '') == 'bbr'
+
+# ─── auditd ───────────────────────────────────────────────────────────────
+- name: Install auditd
+  ansible.builtin.apt:
+    name: auditd
+    state: present
+  when: auditd_enabled | default(false)
+
+- name: Deploy audit rules
+  ansible.builtin.template:
+    src: audit.rules.j2
+    dest: /etc/audit/rules.d/99-ha-san.rules
+    mode: "0640"
+  when: auditd_enabled | default(false)
+  notify: restart auditd
+
+- name: Enable auditd service
+  ansible.builtin.systemd:
+    name: auditd
+    enabled: true
+    state: started
+  when: auditd_enabled | default(false)
+
+# ─── syslog forwarding ────────────────────────────────────────────────────
+- name: Install rsyslog
+  ansible.builtin.apt:
+    name: rsyslog
+    state: present
+  when: syslog_remote_enabled | default(false)
+
+- name: Deploy rsyslog remote forwarding config
+  ansible.builtin.template:
+    src: rsyslog-forward.conf.j2
+    dest: /etc/rsyslog.d/90-remote.conf
+    mode: "0644"
+  when: syslog_remote_enabled | default(false)
+  notify: restart rsyslog
+
+# ─── hardware watchdog ────────────────────────────────────────────────────
+- name: Install watchdog
+  ansible.builtin.apt:
+    name: watchdog
+    state: present
+  when: watchdog_enabled | default(false)
+
+- name: Deploy watchdog configuration
+  ansible.builtin.template:
+    src: watchdog.conf.j2
+    dest: /etc/watchdog.conf
+    mode: "0644"
+  when: watchdog_enabled | default(false)
+  notify: restart watchdog
+
+- name: Enable watchdog service
+  ansible.builtin.systemd:
+    name: watchdog
+    enabled: true
+    state: started
+  when: watchdog_enabled | default(false)
