@@ -32,7 +32,12 @@ iscsi_peer_iqn: "{{ iscsi_iqn_prefix }}:storage-b"
 #
 # Example output:
 #   ata-WDC_WD100EFAX-68LHPN0_XXXXXXXX -> ../../sda
-#   ata-WDC_WD100EFAX-68LHPN0_YYYYYYYY -> ../../sdb
+#   ata-Samsung_SSD_870_EVO_4TB_XXXXXXX -> ../../sdb
+#
+# Any number of disks is supported — 1, 2, 4, 12, 24, etc.
+# Each entry in local_data_disks on storage-a is mirrored 1:1 with the
+# corresponding entry on storage-b (matched by position). Both nodes must
+# have the same count.
 #
 # Symmetric active/passive HA design:
 # Each node exports its local disks via LIO iSCSI target AND connects to the peer's target.
@@ -50,22 +55,7 @@ local_data_disks:
     label: "data-a-2"
   - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_3
     label: "data-a-3"
-  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_4
-    label: "data-a-4"
-  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_5
-    label: "data-a-5"
-  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_6
-    label: "data-a-6"
-  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_7
-    label: "data-a-7"
-  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_8
-    label: "data-a-8"
-  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_9
-    label: "data-a-9"
-  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_10
-    label: "data-a-10"
-  - device: /dev/disk/by-id/ata-PLACEHOLDER_DISK_A_11
-    label: "data-a-11"
+  # Add more disks here following the same pattern
 
 # Optional: SLOG and special vdev disks (NVMe recommended for SLOG)
 # SLOG accelerates sync writes (NFS sync, database commits) significantly.

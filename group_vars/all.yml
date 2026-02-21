@@ -21,7 +21,7 @@ vlans:
   storage:
     id: 10
     subnet: "10.10.10.0/24"
-    mtu: 9000
+    mtu: 9000  # jumbo frames — requires switch + NIC support; set to 1500 for 1GbE or unsupported hardware
     description: "iSCSI replication between storage nodes"
   management:
     id: 20
@@ -31,7 +31,7 @@ vlans:
   client:
     id: 30
     subnet: "10.30.30.0/24"
-    mtu: 9000  # set to 1500 if not all clients support jumbo
+    mtu: 9000  # jumbo frames — set to 1500 if clients or switches don't support them
     description: "NFS, SMB, iSCSI client traffic"
 
 # Floating VIPs — managed by Pacemaker, bind to client VLAN
@@ -55,16 +55,20 @@ corosync_transport: knet
 corosync_crypto_cipher: aes256
 corosync_crypto_hash: sha256
 
-# Node definitions for corosync.conf — ring0 = mgmt, ring1 = storage (optional)
+# Node definitions for corosync.conf.
+# ring0 is always required (management VLAN).
+# ring1 is optional — omit ring1_addr for nodes that share a single NIC across
+# all VLANs, or when you don't want a redundant cluster heartbeat on the
+# storage VLAN. Remove ring1_addr from both storage nodes to disable ring1.
 corosync_nodes:
   - name: storage-a
     nodeid: 1
     ring0_addr: "10.20.20.1"
-    ring1_addr: "10.10.10.1"   # storage VLAN — redundant ring
+    ring1_addr: "10.10.10.1"   # optional: storage VLAN redundant ring — remove if using shared/single NIC
   - name: storage-b
     nodeid: 2
     ring0_addr: "10.20.20.2"
-    ring1_addr: "10.10.10.2"
+    ring1_addr: "10.10.10.2"   # optional: remove if not using a dedicated storage NIC
   - name: quorum
     nodeid: 3
     ring0_addr: "10.20.20.3"

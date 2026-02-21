@@ -6,11 +6,45 @@
 # ---------------------------------------------------------------------------
 # Network interfaces — adjust to match your hardware
 # ---------------------------------------------------------------------------
-# These are the physical or bond interface names BEFORE VLAN subinterfaces.
-# The playbook creates VLAN subinterfaces on top of these.
-net_storage_parent: "ens3f0"      # 40GbE Mellanox — for iSCSI replication
-net_client_parent: "ens3f1"       # for NFS/SMB/iSCSI client traffic
-net_mgmt_interface: "eno1"        # 1GbE onboard — management + Corosync ring0
+# Physical or bond interface names used as VLAN parents.
+# NOTE: The playbook does NOT configure OS network interfaces. These variables
+# are informational — override per-host in host_vars/<hostname>.yml when nodes
+# have different NIC models or names.
+#
+# Three common deployment scenarios:
+#
+# A) Dedicated NIC per network (recommended for performance isolation)
+#    Separate physical or bond interfaces for each traffic type.
+#    Corosync ring1 on the storage VLAN provides a redundant heartbeat.
+#
+#      net_mgmt_interface: "eno1"      # Management, SSH, Corosync ring0
+#      net_storage_parent: "ens3f0"    # iSCSI backend replication
+#      net_client_parent:  "ens3f1"    # NFS / SMB / iSCSI client traffic
+#      # in all.yml: include ring1_addr in corosync_nodes for storage nodes
+#
+# B) Shared NIC for storage + client, dedicated management
+#    One high-speed NIC carries both storage and client VLANs.
+#    Set net_storage_parent and net_client_parent to the same interface.
+#    Corosync ring1 can still use the storage VLAN on this NIC, or be omitted.
+#
+#      net_mgmt_interface: "eno1"      # Management
+#      net_storage_parent: "eth0"      # iSCSI backend (storage VLAN)
+#      net_client_parent:  "eth0"      # NFS/SMB/iSCSI client (client VLAN)
+#      # in all.yml: omit ring1_addr from corosync_nodes to skip ring1
+#
+# C) All traffic on one NIC (lab / minimal hardware)
+#    A single interface carries all VLANs. Only ring0 is used for Corosync.
+#
+#      net_mgmt_interface: "eth0"      # All traffic
+#      net_storage_parent: "eth0"
+#      net_client_parent:  "eth0"
+#      # in all.yml: omit ring1_addr from corosync_nodes
+#
+# Default below matches scenario A with placeholder names.
+# Run `ip link show` on your nodes to find actual interface names.
+net_mgmt_interface: "eno1"        # Management — SSH, Corosync ring0
+net_storage_parent: "ens3f0"      # iSCSI backend replication (storage VLAN)
+net_client_parent:  "ens3f1"      # NFS / SMB / iSCSI client traffic (client VLAN)
 
 # ---------------------------------------------------------------------------
 # ZFS
@@ -245,8 +279,18 @@ sanoid_templates:
     autoprune: true
 
 # ---------------------------------------------------------------------------
-# TCP / Network tuning for 40GbE iSCSI
+# TCP / Network performance tuning (optional)
 # ---------------------------------------------------------------------------
+# Increases TCP socket buffer sizes for high-throughput iSCSI.
+# Scale rmem_max/wmem_max to roughly 1/8 of your per-session bandwidth:
+#   1GbE  (~125 MB/s):  4194304   (4 MB)
+#   10GbE (~1.2 GB/s):  8388608   (8 MB)
+#   25GbE (~3 GB/s):    16777216  (16 MB)  ← values below
+#   40GbE+ (~5 GB/s):   33554432  (32 MB)
+#
+# To disable TCP buffer tuning entirely (e.g. kernel defaults are fine),
+# comment out or remove the tcp_tunables block. The hardening role skips
+# this step when tcp_tunables is not defined.
 tcp_tunables:
   net.core.rmem_max: 16777216
   net.core.wmem_max: 16777216

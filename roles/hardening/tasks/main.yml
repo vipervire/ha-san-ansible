@@ -19,12 +19,12 @@
   notify: reload sysctl
 
 # ─── TCP performance tuning (storage nodes only) ──────────────────────────
-- name: Deploy TCP tuning for 40GbE
+- name: Deploy TCP tuning
   ansible.builtin.copy:
     dest: /etc/sysctl.d/91-tcp-tuning.conf
     mode: "0644"
     content: |
-      # Managed by Ansible — 40GbE iSCSI TCP tuning
+      # Managed by Ansible — iSCSI TCP tuning
       {% for key, value in tcp_tunables.items() %}
       {{ key }} = {{ value }}
       {% endfor %}
