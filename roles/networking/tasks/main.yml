@@ -1,11 +1,34 @@
 ---
-# roles/networking/tasks/main.yml — Optional network interface configuration
-# Only runs when networking_manage: true
-# Configures VLANs and MTU via systemd-networkd.
+# roles/networking/tasks/main.yml — Network interface configuration + TCP tuning
 #
-# WARNING: Enabling this on a running system may disrupt connectivity.
+# Interface management is opt-in (networking_manage: true).
+# TCP performance tuning runs unconditionally on storage nodes when tcp_tunables
+# is defined — it does not require networking_manage to be enabled.
+#
+# WARNING: Enabling networking_manage on a running system may disrupt connectivity.
 #          Set networking_restart_on_change: true only during initial deployment.
 
+# ─── TCP performance tuning (storage nodes) ───────────────────────────────
+# Lives here (not in hardening) because this is performance configuration,
+# not security hardening. Runs whenever tcp_tunables is defined.
+- name: Deploy TCP tuning sysctl settings
+  ansible.builtin.template:
+    src: 91-tcp-tuning.conf.j2
+    dest: /etc/sysctl.d/91-tcp-tuning.conf
+    mode: "0644"
+  when: tcp_tunables is defined
+  notify: reload sysctl
+
+- name: Load tcp_bbr kernel module
+  community.general.modprobe:
+    name: tcp_bbr
+    state: present
+    persistent: present
+  when: >
+    tcp_tunables is defined and
+    tcp_tunables.get('net.ipv4.tcp_congestion_control', '') == 'bbr'
+
+# ─── Interface configuration (opt-in) ─────────────────────────────────────
 - name: Install systemd-networkd
   ansible.builtin.apt:
     name: systemd-networkd

@@ -26,11 +26,13 @@
   failed_when: false
   changed_when: false
 
-- name: Run LIO target setup (first time only)
+- name: Run LIO target setup (first time or forced)
   ansible.builtin.command:
     cmd: /root/setup-lio-target.sh
-  when: lio_check.rc != 0
+  when: lio_check.rc != 0 or (force_iscsi_reconfigure | default(false) | bool)
   notify: save lio config
+  # To force re-run after a failed partial setup:
+  #   ansible-playbook -i inventory.yml site.yml --tags storage -e force_iscsi_reconfigure=true
 
 - name: Set permissions on saveconfig.json
   ansible.builtin.file:

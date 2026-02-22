@@ -46,17 +46,31 @@
           - "'CHANGEME' not in (hacluster_password | string)"
           - "'CHANGEME' not in (iscsi_chap_password | string)"
           - "'CHANGEME' not in (iscsi_mutual_chap_password | string)"
+          - stonith_passwords_ok
+          - "'your-key-here' not in (admin_ssh_pubkey | string)"
+          - admin_ssh_pubkey | length > 20
         fail_msg: |
           SECURITY ERROR: Default placeholder credentials detected.
           Update before deploying:
             hacluster_password         — ansible-vault encrypt_string 'yourpassword'
             iscsi_chap_password        — ansible-vault encrypt_string 'yourpassword'
             iscsi_mutual_chap_password — ansible-vault encrypt_string 'yourpassword'
-          Also verify STONITH passwords in stonith_nodes dict.
+            stonith_nodes.<node>.password — ansible-vault encrypt_string 'yourpassword'
+            admin_ssh_pubkey           — replace with your actual SSH public key
       vars:
         hacluster_password: "{{ hostvars[groups['storage_nodes'][0]]['hacluster_password'] | default('') }}"
         iscsi_chap_password: "{{ hostvars[groups['storage_nodes'][0]]['iscsi_chap_password'] | default('') }}"
         iscsi_mutual_chap_password: "{{ hostvars[groups['storage_nodes'][0]]['iscsi_mutual_chap_password'] | default('') }}"
+        _stonith_nodes: "{{ hostvars[groups['storage_nodes'][0]]['stonith_nodes'] | default({}) }}"
+        stonith_passwords_ok: >-
+          {{
+            _stonith_nodes.values()
+            | selectattr('password', 'defined')
+            | map(attribute='password')
+            | map('string')
+            | select('search', 'CHANGEME')
+            | list | length == 0
+          }}
 
 # ─── Pre-run: Warn if cluster is already deployed and degraded ──────────────
 - name: "Pre-run cluster health check (storage nodes)"

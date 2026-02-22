@@ -49,9 +49,6 @@ zfs_scrub_randomized_delay_sec: 1800   # 30 minutes random delay
 zfs_scrub_skip_on_degraded: true       # Skip if pool is degraded
 zfs_scrub_min_interval_days: 25        # Minimum days between scrubs
 
-# ZFS scrub monitoring (Prometheus metrics)
-zfs_scrub_monitoring_enabled: true     # Export scrub metrics for Prometheus
-
 # Datasets to create after pool exists
 zfs_datasets:
   - name: "{{ zfs_pool_name }}/nfs"
@@ -87,11 +84,17 @@ iscsi_mutual_chap_enabled: true
 iscsi_mutual_chap_user: "iscsi-target-user"
 iscsi_mutual_chap_password: "CHANGEME-vault-this"  # ansible-vault in production — MUST differ from iscsi_chap_password
 
-# open-iscsi initiator aggressive-safe timeouts
+# open-iscsi initiator aggressive-safe timeouts (tune for your network)
+# iscsi_replacement_timeout defaults to 5s in iscsi-initiator role (see defaults/main.yml)
 iscsi_replacement_timeout: 5
 iscsi_noop_out_interval: 2
 iscsi_noop_out_timeout: 2
 iscsi_login_timeout: 10       # Reduced: replacement_timeout (5s) handles path failures; this covers initial login
+
+# iSCSI queue depth — tune for storage device type
+# SATA SSD: 32-64, NVMe-backed storage: 64-128
+iscsi_queue_depth: 32
+iscsi_cmds_max: 128
 
 # ---------------------------------------------------------------------------
 # iSCSI — Client-facing target (Pacemaker-managed)
@@ -115,10 +118,6 @@ nfs_exports:
     options: "rw,sync,no_subtree_check,root_squash,sec=sys"
 
 nfs_bind_ip: "{{ vip_nfs }}"
-nfs_threads: 8
-nfs_v3_enabled: false
-nfs_v4_enabled: true
-nfs_v41_enabled: true
 
 # ---------------------------------------------------------------------------
 # Samba / SMB
@@ -126,8 +125,6 @@ nfs_v41_enabled: true
 smb_bind_ip: "{{ vip_smb }}"
 smb_workgroup: "HOMELAB"
 smb_server_string: "HA SAN SMB"
-smb_min_protocol: "SMB3"
-smb_signing: "required"
 smb_encrypt: "required"   # "desired" if some clients can't do SMB3 encryption
 smb_shares:
   - name: shared
@@ -206,9 +203,8 @@ stonith_nodes:
 # ---------------------------------------------------------------------------
 # Pacemaker resource configuration
 # ---------------------------------------------------------------------------
-pacemaker_resource_stickiness: 200
 pacemaker_preferred_node: "storage-a"  # soft preference, not hard pin
-
+pacemaker_resource_stickiness: 200
 # Seconds to wait after 'pcs node standby' during shutdown for resources to migrate
 # before pacemaker itself stops. Planned migration takes ~5-8s; 15s is conservative.
 pacemaker_standby_drain_seconds: 15
@@ -263,26 +259,6 @@ syncoid_targets: []
 #     destination: "backup@remote-host:backup-pool/san-pool-nfs"
 
 # ---------------------------------------------------------------------------
-# iSCSI — Client-facing target optional CHAP
-# ---------------------------------------------------------------------------
-iscsi_client_chap_enabled: false
-iscsi_client_chap_user: ""
-iscsi_client_chap_password: ""      # vault this if enabled
-
-# ---------------------------------------------------------------------------
-# NFS grace period (seconds) — time for clients to reclaim locks after failover
-# ---------------------------------------------------------------------------
-nfs_grace_time: 45      # Reduced from 90s default for faster client reconnect
-nfs_lease_time: 45      # Keep in sync with grace_time
-
-# ---------------------------------------------------------------------------
-# iSCSI queue depth and command limit (tune for storage device type)
-# ---------------------------------------------------------------------------
-# SATA SSD: 32-64, NVMe-backed storage: 64-128
-iscsi_queue_depth: 32
-iscsi_cmds_max: 128
-
-# ---------------------------------------------------------------------------
 # TCP / Network tuning for 40GbE iSCSI
 # ---------------------------------------------------------------------------
 tcp_tunables:
@@ -290,5 +266,5 @@ tcp_tunables:
   net.core.wmem_max: 16777216
   net.ipv4.tcp_rmem: "4096 87380 16777216"
   net.ipv4.tcp_wmem: "4096 65536 16777216"
-  net.ipv4.tcp_congestion_control: bbr    # Requires tcp_bbr module (loaded by hardening role)
+  net.ipv4.tcp_congestion_control: bbr    # Requires tcp_bbr module (loaded by networking role)
   net.core.default_qdisc: fq             # Required for BBR to work optimally

@@ -4,3 +4,7 @@
     name: systemd-networkd
     state: restarted
   when: networking_restart_on_change | default(false)
+
+- name: reload sysctl
+  ansible.builtin.command:
+    cmd: sysctl --system

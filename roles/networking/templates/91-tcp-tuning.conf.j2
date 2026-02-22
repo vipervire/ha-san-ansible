@@ -1,0 +1,5 @@
+# Managed by Ansible — 40GbE iSCSI TCP tuning
+# Node: {{ inventory_hostname }}
+{% for key, value in tcp_tunables.items() %}
+{{ key }} = {{ value }}
+{% endfor %}

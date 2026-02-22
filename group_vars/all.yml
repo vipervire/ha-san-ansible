@@ -125,29 +125,3 @@ firewall_rate_limit_enabled: true
 # NFSv3 ports in firewall (111/tcp+udp, 20048) — only needed if nfs_v3_enabled: true
 # (mirrored from services role; set both consistently)
 nfs_v3_enabled: false
-
-# ---------------------------------------------------------------------------
-# Monitoring — disk health and ECC memory
-# ---------------------------------------------------------------------------
-smart_monitoring_enabled: true     # SMART disk health exporter (storage nodes only)
-ras_monitoring_enabled: false      # ECC memory monitoring via rasdaemon (not all hardware has ECC)
-
-# Alertmanager ntfy integration config — set URL to enable alertmanager.yml generation
-alertmanager_ntfy_url: ""
-
-# ---------------------------------------------------------------------------
-# Monitoring — node_exporter TLS (optional)
-# ---------------------------------------------------------------------------
-node_exporter_tls_enabled: false
-# node_exporter_cert_file: /etc/ssl/certs/node-exporter.crt
-# node_exporter_key_file: /etc/ssl/private/node-exporter.key
-# node_exporter_basic_auth_users:
-#   prometheus: "$2b$12$..."   # bcrypt hash
-
-# ---------------------------------------------------------------------------
-# Cockpit — custom TLS certificate (optional)
-# ---------------------------------------------------------------------------
-# By default Cockpit uses a self-signed cert. Provide paths to deploy your own.
-# Paths are on the Ansible controller (src:), not the target node.
-# cockpit_tls_cert_file: "/path/on/ansible/controller/cert.pem"
-# cockpit_tls_key_file:  "/path/on/ansible/controller/key.pem"

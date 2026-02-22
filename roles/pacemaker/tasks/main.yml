@@ -56,7 +56,7 @@
       {% endfor %}
       -u hacluster -p {{ hacluster_password }}
   run_once: true
-  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  delegate_to: "{{ pacemaker_preferred_node }}"
   changed_when: false
   failed_when: false
 
@@ -67,7 +67,7 @@
   changed_when: false
   failed_when: false
   run_once: true
-  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  delegate_to: "{{ pacemaker_preferred_node }}"
 
 - name: Create cluster (first time only)
   ansible.builtin.command:
@@ -77,24 +77,32 @@
       {{ node.name }} addr={{ node.ring0_addr }}
       {% endfor %}
   run_once: true
-  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  delegate_to: "{{ pacemaker_preferred_node }}"
   when: cluster_status.rc != 0
 
 - name: Start cluster on all nodes
   ansible.builtin.command:
     cmd: pcs cluster start --all
+  register: cluster_start
   run_once: true
-  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  delegate_to: "{{ pacemaker_preferred_node }}"
   changed_when: false
-  failed_when: false
+  failed_when: >
+    cluster_start.rc != 0 and
+    'already' not in (cluster_start.stderr | lower) and
+    'already' not in (cluster_start.stdout | lower)
 
 - name: Enable cluster auto-start on all nodes
   ansible.builtin.command:
     cmd: pcs cluster enable --all
+  register: cluster_enable
   run_once: true
-  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  delegate_to: "{{ pacemaker_preferred_node }}"
   changed_when: false
-  failed_when: false
+  failed_when: >
+    cluster_enable.rc != 0 and
+    'already' not in (cluster_enable.stderr | lower) and
+    'already' not in (cluster_enable.stdout | lower)
 
 # ─── Cluster properties and STONITH (run once) ────────────────────────────
 - name: Configure cluster properties
@@ -104,7 +112,7 @@
     - "stonith-enabled=true"
     - "no-quorum-policy=stop"
   run_once: true
-  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  delegate_to: "{{ pacemaker_preferred_node }}"
   changed_when: false
   failed_when: false
 
@@ -112,7 +120,7 @@
   ansible.builtin.command:
     cmd: pcs resource defaults update resource-stickiness={{ pacemaker_resource_stickiness }}
   run_once: true
-  delegate_to: "{{ pacemaker_preferred_node | default('storage-a') }}"
+  delegate_to: "{{ pacemaker_preferred_node }}"
   changed_when: false
   failed_when: false
 
@@ -121,7 +129,7 @@
     src: configure-resources.sh.j2
     dest: /root/configure-pacemaker-resources.sh
     mode: "0700"
-  when: inventory_hostname == pacemaker_preferred_node | default('storage-a')
+  when: inventory_hostname == pacemaker_preferred_node
 
 # ─── Graceful standby on shutdown (storage nodes only) ────────────────────
 - name: Deploy pacemaker-node-standby systemd service
@@ -153,4 +161,4 @@
     src: configure-stonith.sh.j2
     dest: /root/configure-stonith.sh
     mode: "0700"
-  when: inventory_hostname == pacemaker_preferred_node | default('storage-a')
+  when: inventory_hostname == pacemaker_preferred_node
