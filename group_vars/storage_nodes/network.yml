@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# Storage Node Variables — Network interfaces and TCP tuning
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Network interfaces — adjust to match your hardware
+# ---------------------------------------------------------------------------
+# These are the physical or bond interface names BEFORE VLAN subinterfaces.
+# The playbook creates VLAN subinterfaces on top of these.
+net_storage_parent: "ens3f0"      # 40GbE Mellanox — for iSCSI replication
+net_client_parent: "ens3f1"       # for NFS/SMB/iSCSI client traffic
+net_mgmt_interface: "eno1"        # 1GbE onboard — management + Corosync ring0
+
+# ---------------------------------------------------------------------------
+# TCP / Network tuning for 40GbE iSCSI
+# ---------------------------------------------------------------------------
+tcp_tunables:
+  net.core.rmem_max: 16777216
+  net.core.wmem_max: 16777216
+  net.ipv4.tcp_rmem: "4096 87380 16777216"
+  net.ipv4.tcp_wmem: "4096 65536 16777216"
+  net.ipv4.tcp_congestion_control: bbr    # Requires tcp_bbr module (loaded by networking role)
+  net.core.default_qdisc: fq             # Required for BBR to work optimally

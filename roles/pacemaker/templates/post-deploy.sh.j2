@@ -1,0 +1,151 @@
+#!/bin/bash
+# Managed by Ansible — Post-deployment guide for {{ inventory_hostname }}
+#
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  Run this script after `ansible-playbook site.yml` completes.          ║
+# ║  It walks through the three manual post-deploy steps in order,         ║
+# ║  checking prerequisites before each step.                              ║
+# ║                                                                         ║
+# ║  Usage:  bash /root/post-deploy.sh                                     ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+set -euo pipefail
+
+RED='\033[0;31m'
+GRN='\033[0;32m'
+YEL='\033[1;33m'
+CYN='\033[0;36m'
+NC='\033[0m'
+
+step() { echo -e "\n${CYN}══ $* ══${NC}"; }
+ok()   { echo -e "${GRN}  ✓ $*${NC}"; }
+warn() { echo -e "${YEL}  ! $*${NC}"; }
+fail() { echo -e "${RED}  ✗ $*${NC}"; }
+ask()  { echo -e "${YEL}\n  $* [y/N] ${NC}"; read -r answer; [[ "${answer,,}" == "y" ]]; }
+
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║   HA SAN Post-Deployment Steps                              ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
+echo "This script runs on: {{ inventory_hostname }} ({{ mgmt_ip }})"
+echo "Cluster: {{ cluster_name }}"
+echo ""
+
+# ─── Prerequisite: cluster must be online ────────────────────────────────────
+step "Checking cluster status"
+if ! pcs cluster status &>/dev/null; then
+  fail "Pacemaker cluster is not running. Ensure the cluster play has been applied:"
+  echo "      ansible-playbook -i inventory.yml site.yml --tags cluster"
+  exit 1
+fi
+
+all_online=true
+while IFS= read -r line; do
+  if echo "${line}" | grep -qi "offline\|FAILED\|error"; then
+    fail "${line}"
+    all_online=false
+  else
+    ok "${line}"
+  fi
+done < <(pcs cluster status 2>/dev/null | grep -E "Node|Status" || true)
+
+if [[ "${all_online}" == "false" ]]; then
+  fail "One or more nodes are not online. Investigate before continuing."
+  echo "      pcs status"
+  exit 1
+fi
+
+# ─── Step 1: STONITH fencing ──────────────────────────────────────────────────
+step "Step 1 of 3 — Configure STONITH fencing"
+echo ""
+echo "  STONITH fences (powers off) a failed node before the survivor"
+echo "  imports the ZFS pool. This prevents split-brain data corruption."
+echo ""
+
+if pcs stonith status 2>/dev/null | grep -q "fence-"; then
+  ok "STONITH resources already configured:"
+  pcs stonith status 2>/dev/null | grep "fence-" | sed 's/^/    /'
+  echo ""
+  warn "If you need to reconfigure fencing, re-run: bash /root/configure-stonith.sh"
+else
+  warn "No STONITH resources found. Running configure-stonith.sh now..."
+  bash /root/configure-stonith.sh
+  echo ""
+  ok "STONITH configured. Verify reachability:"
+  pcs stonith status 2>/dev/null | sed 's/^/    /' || true
+fi
+
+echo ""
+warn "CAUTION: Never run 'pcs stonith fence <node>' without a maintenance window."
+warn "         It will immediately power off the target node."
+
+# ─── Step 2: ZFS pool creation ────────────────────────────────────────────────
+step "Step 2 of 3 — Create ZFS pool"
+echo ""
+
+if pcs resource show zfs-pool &>/dev/null 2>&1 || zpool list {{ zfs_pool_name }} &>/dev/null 2>&1; then
+  ok "ZFS pool '{{ zfs_pool_name }}' already exists or is already a Pacemaker resource."
+  ok "Skipping pool creation step."
+else
+  echo "  The ZFS pool must be created manually because iSCSI device paths"
+  echo "  vary per environment and must be verified before mirroring."
+  echo ""
+  echo "  a) Verify iSCSI sessions are established on both nodes:"
+  echo "     ssh storage-a 'iscsiadm -m session'"
+  echo "     ssh storage-b 'iscsiadm -m session'"
+  echo ""
+  echo "  b) Review the auto-discovered paths in the helper script:"
+  echo "     cat /root/create-pool.sh | head -80"
+  echo ""
+  echo "  c) Check the iSCSI by-path entries match your expectations:"
+  echo "     ls -la /dev/disk/by-path/ | grep iscsi"
+  echo ""
+  if ask "Have you verified iSCSI paths and are ready to create the pool?"; then
+    bash /root/create-pool.sh
+    echo ""
+    echo "  d) Export the pool so Pacemaker can manage it:"
+    if ask "Pool created. Export it now with 'zpool export {{ zfs_pool_name }}'?"; then
+      zpool export {{ zfs_pool_name }}
+      ok "Pool exported. Pacemaker will import it when resources are configured."
+    else
+      warn "Remember to export the pool before configuring Pacemaker resources:"
+      warn "  zpool export {{ zfs_pool_name }}"
+      exit 0
+    fi
+  else
+    warn "Skipping pool creation. Re-run this script when ready."
+    exit 0
+  fi
+fi
+
+# ─── Step 3: Pacemaker resources ─────────────────────────────────────────────
+step "Step 3 of 3 — Configure Pacemaker resources"
+echo ""
+
+if pcs resource show zfs-pool &>/dev/null 2>&1; then
+  ok "Pacemaker resources already configured. Running update pass..."
+  bash /root/configure-pacemaker-resources.sh
+else
+  echo "  This configures the ZFS pool resource, VIPs (NFS, SMB, iSCSI, Cockpit),"
+  echo "  service resources, and all ordering/colocation constraints."
+  echo ""
+  if ask "Configure Pacemaker resources now?"; then
+    bash /root/configure-pacemaker-resources.sh
+  else
+    warn "Skipping Pacemaker resource configuration."
+    warn "Run manually when ready: bash /root/configure-pacemaker-resources.sh"
+    exit 0
+  fi
+fi
+
+# ─── Final status ─────────────────────────────────────────────────────────────
+step "Deployment complete"
+echo ""
+pcs status
+echo ""
+echo "Useful commands:"
+echo "  pcs status                              — cluster and resource health"
+echo "  pcs stonith status                      — fencing agent status"
+echo "  zpool status {{ zfs_pool_name }}                        — pool health"
+echo "  pcs resource move zfs-pool storage-b    — planned failover to storage-b"
+echo "  pcs resource clear zfs-pool             — remove location constraint after move"

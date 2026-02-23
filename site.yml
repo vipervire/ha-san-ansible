@@ -58,10 +58,10 @@
             stonith_nodes.<node>.password — ansible-vault encrypt_string 'yourpassword'
             admin_ssh_pubkey           — replace with your actual SSH public key
       vars:
-        hacluster_password: "{{ hostvars[groups['storage_nodes'][0]]['hacluster_password'] | default('') }}"
-        iscsi_chap_password: "{{ hostvars[groups['storage_nodes'][0]]['iscsi_chap_password'] | default('') }}"
-        iscsi_mutual_chap_password: "{{ hostvars[groups['storage_nodes'][0]]['iscsi_mutual_chap_password'] | default('') }}"
-        _stonith_nodes: "{{ hostvars[groups['storage_nodes'][0]]['stonith_nodes'] | default({}) }}"
+        hacluster_password: "{{ hostvars[groups['storage_nodes'][0]].hacluster_password | default('') }}"
+        iscsi_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_chap_password | default('') }}"
+        iscsi_mutual_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_mutual_chap_password | default('') }}"
+        _stonith_nodes: "{{ hostvars[groups['storage_nodes'][0]].stonith_nodes | default({}) }}"
         stonith_passwords_ok: >-
           {{
             _stonith_nodes.values()
@@ -71,6 +71,19 @@
             | select('search', 'CHANGEME')
             | list | length == 0
           }}
+
+    - name: Assert mutual CHAP password differs from forward CHAP password
+      ansible.builtin.assert:
+        that:
+          - iscsi_chap_password != iscsi_mutual_chap_password
+        fail_msg: |
+          CONFIGURATION ERROR: iscsi_chap_password and iscsi_mutual_chap_password must be different.
+          iSCSI rejects identical bidirectional CHAP credentials.
+          Set distinct vault-encrypted values for each in group_vars/storage_nodes/iscsi.yml.
+      vars:
+        iscsi_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_chap_password | default('') }}"
+        iscsi_mutual_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_mutual_chap_password | default('') }}"
+      when: hostvars[groups['storage_nodes'][0]].iscsi_mutual_chap_enabled | default(false) | bool
 
 # ─── Pre-run: Warn if cluster is already deployed and degraded ──────────────
 - name: "Pre-run cluster health check (storage nodes)"

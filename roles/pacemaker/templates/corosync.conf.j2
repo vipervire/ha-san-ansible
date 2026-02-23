@@ -18,9 +18,9 @@ totem {
 nodelist {
 {% for node in corosync_nodes %}
     node {
-        ring0_addr: {{ node.ring0_addr }}
-{% if node.ring1_addr is defined %}
-        ring1_addr: {{ node.ring1_addr }}
+        ring0_addr: {{ hostvars[node.name].mgmt_ip }}
+{% if hostvars[node.name].storage_ip is defined %}
+        ring1_addr: {{ hostvars[node.name].storage_ip }}
 {% endif %}
         name: {{ node.name }}
         nodeid: {{ node.nodeid }}

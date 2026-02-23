@@ -55,20 +55,18 @@ corosync_transport: knet
 corosync_crypto_cipher: aes256
 corosync_crypto_hash: sha256
 
-# Node definitions for corosync.conf — ring0 = mgmt, ring1 = storage (optional)
+# Node definitions for corosync.conf
+# Ring addresses are derived automatically from host_vars:
+#   ring0_addr ← hostvars[name].mgmt_ip    (management VLAN, present on all nodes)
+#   ring1_addr ← hostvars[name].storage_ip (storage VLAN, only on storage nodes)
+# To change a node's ring address, update mgmt_ip/storage_ip in host_vars/<node>.yml.
 corosync_nodes:
   - name: storage-a
     nodeid: 1
-    ring0_addr: "10.20.20.1"
-    ring1_addr: "10.10.10.1"   # storage VLAN — redundant ring
   - name: storage-b
     nodeid: 2
-    ring0_addr: "10.20.20.2"
-    ring1_addr: "10.10.10.2"
   - name: quorum
     nodeid: 3
-    ring0_addr: "10.20.20.3"
-    # No ring1 — quorum node has no storage VLAN
 
 # ---------------------------------------------------------------------------
 # NTP

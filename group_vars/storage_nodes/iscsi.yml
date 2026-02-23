@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# Storage Node Variables — iSCSI backend replication and client-facing target
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# iSCSI — Backend replication layer (peer-to-peer, Pacemaker-independent)
+# ---------------------------------------------------------------------------
+iscsi_iqn_prefix: "iqn.2025-01.lab.home"
+
+# CHAP authentication for backend replication
+iscsi_chap_enabled: true
+iscsi_chap_user: "iscsi-repl-user"
+iscsi_chap_password: "CHANGEME-vault-this"  # ansible-vault in production
+
+# Mutual CHAP: initiator verifies the target knows this credential (bidirectional auth)
+# When enabled, the target presents these credentials back to the initiator.
+# Both nodes share the same mutual CHAP credential (symmetric design).
+# MUST differ from iscsi_chap_password — iSCSI rejects identical bidirectional credentials.
+iscsi_mutual_chap_enabled: true
+iscsi_mutual_chap_user: "iscsi-target-user"
+iscsi_mutual_chap_password: "CHANGEME-vault-this"  # ansible-vault in production — MUST differ from iscsi_chap_password
+
+# open-iscsi initiator aggressive-safe timeouts (tune for your network)
+# iscsi_replacement_timeout defaults to 5s in iscsi-initiator role (see defaults/main.yml)
+iscsi_replacement_timeout: 5
+iscsi_noop_out_interval: 2
+iscsi_noop_out_timeout: 2
+iscsi_login_timeout: 10       # Reduced: replacement_timeout (5s) handles path failures; this covers initial login
+
+# iSCSI queue depth — tune for storage device type
+# SATA SSD: 32-64, NVMe-backed storage: 64-128
+iscsi_queue_depth: 32
+iscsi_cmds_max: 128
+
+# ---------------------------------------------------------------------------
+# iSCSI — Client-facing target (Pacemaker-managed)
+# ---------------------------------------------------------------------------
+iscsi_client_iqn: "{{ iscsi_iqn_prefix }}:san-client-target"
+
+# Proxmox initiator IQNs allowed to connect to client-facing target
+iscsi_client_acls:
+  - "{{ iscsi_iqn_prefix }}:proxmox-a"
+  - "{{ iscsi_iqn_prefix }}:proxmox-b"

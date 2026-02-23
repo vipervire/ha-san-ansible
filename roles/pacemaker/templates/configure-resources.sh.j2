@@ -12,92 +12,114 @@ set -euo pipefail
 echo "=== Configuring Pacemaker HA resources ==="
 
 # ─── ZFS pool import resource (anchor — everything colocates with this) ────
-echo "Creating ZFS pool resource"
+#
+# STONITH FENCING LATENCY vs. ZFS POOL START TIMEOUT:
+#   On unplanned node failure, Pacemaker fences the dead node BEFORE importing
+#   the ZFS pool on the survivor (zfs multihost=on enforces this ordering).
+#   The start timeout (150s) must exceed the maximum expected fencing latency:
+#     ipmi  — ~20-30s  (BMC IPMI power cycle)
+#     kasa  — ~5-15s   (TP-Link Kasa smart plug)
+#     http  — varies
+#   150s provides ample headroom for all supported methods. If your fence
+#   agent is unusually slow, increase pcmk_reboot_timeout in configure-stonith.sh
+#   AND the start timeout here to match.
+echo "Creating/updating ZFS pool resource"
 pcs resource create zfs-pool ocf:heartbeat:ZFS \
   pool="{{ zfs_pool_name }}" \
   op start timeout=150s \
   op stop timeout=90s \
   op monitor interval=30s timeout=30s \
-  2>/dev/null || echo "  (zfs-pool may already exist)"
+  2>/dev/null || \
+  pcs resource update zfs-pool pool="{{ zfs_pool_name }}"
 
 # ─── Virtual IPs ───────────────────────────────────────────────────────────
-echo "Creating VIP resources"
+echo "Creating/updating VIP resources"
 pcs resource create vip-nfs ocf:heartbeat:IPaddr2 \
   ip="{{ vip_nfs }}" cidr_netmask={{ vip_cidr }} \
   op monitor interval=10s \
-  2>/dev/null || echo "  (vip-nfs may already exist)"
+  2>/dev/null || \
+  pcs resource update vip-nfs ip="{{ vip_nfs }}" cidr_netmask={{ vip_cidr }}
 
 pcs resource create vip-smb ocf:heartbeat:IPaddr2 \
   ip="{{ vip_smb }}" cidr_netmask={{ vip_cidr }} \
   op monitor interval=10s \
-  2>/dev/null || echo "  (vip-smb may already exist)"
+  2>/dev/null || \
+  pcs resource update vip-smb ip="{{ vip_smb }}" cidr_netmask={{ vip_cidr }}
 
 pcs resource create vip-iscsi ocf:heartbeat:IPaddr2 \
   ip="{{ vip_iscsi }}" cidr_netmask={{ vip_cidr }} \
   op monitor interval=10s \
-  2>/dev/null || echo "  (vip-iscsi may already exist)"
+  2>/dev/null || \
+  pcs resource update vip-iscsi ip="{{ vip_iscsi }}" cidr_netmask={{ vip_cidr }}
 
 # Management VLAN VIP for Cockpit
 pcs resource create vip-cockpit ocf:heartbeat:IPaddr2 \
   ip="{{ vip_cockpit }}" cidr_netmask={{ vip_mgmt_cidr }} \
   op monitor interval=10s \
-  2>/dev/null || echo "  (vip-cockpit may already exist)"
+  2>/dev/null || \
+  pcs resource update vip-cockpit ip="{{ vip_cockpit }}" cidr_netmask={{ vip_mgmt_cidr }}
 
 # ─── Service resources ─────────────────────────────────────────────────────
-echo "Creating service resources"
+echo "Creating service resources (idempotent — skipped if already present)"
 pcs resource create nfs-server systemd:nfs-kernel-server \
   op start timeout=30s op stop timeout=30s \
   op monitor interval=30s \
-  2>/dev/null || echo "  (nfs-server may already exist)"
+  2>/dev/null || echo "  (nfs-server already exists)"
 
 pcs resource create smb-server systemd:smbd \
   op start timeout=30s op stop timeout=30s \
   op monitor interval=30s \
-  2>/dev/null || echo "  (smb-server may already exist)"
+  2>/dev/null || echo "  (smb-server already exists)"
 
 # Cockpit service (starts after pool import so it can access shared configs)
 pcs resource create cockpit-service systemd:cockpit.socket \
   op start timeout=30s op stop timeout=30s \
   op monitor interval=30s \
-  2>/dev/null || echo "  (cockpit-service may already exist)"
+  2>/dev/null || echo "  (cockpit-service already exists)"
 
 # ─── Service groups (VIP + service, ordered within group) ──────────────────
 # Each group starts its VIP first, then its service — independently of other groups.
 # This allows NFS, SMB, and Cockpit to start in parallel after the pool is ready.
 echo "Creating service groups"
 pcs resource group add nfs-group vip-nfs nfs-server \
-  2>/dev/null || echo "  (nfs-group may already exist)"
+  2>/dev/null || echo "  (nfs-group already exists)"
 
 pcs resource group add smb-group vip-smb smb-server \
-  2>/dev/null || echo "  (smb-group may already exist)"
+  2>/dev/null || echo "  (smb-group already exists)"
 
 pcs resource group add cockpit-group vip-cockpit cockpit-service \
-  2>/dev/null || echo "  (cockpit-group may already exist)"
+  2>/dev/null || echo "  (cockpit-group already exists)"
 
 # vip-iscsi is standalone (no Pacemaker-managed service behind it)
 
 # ─── Ordering: pool must be fully started before any VIP/service group ─────
 # Groups start in parallel after pool — no ordering between groups.
+#
+# NOTE on re-runs: Pacemaker ordering constraints are fully declarative and
+# idempotent — adding the same constraint twice is silently ignored. If you
+# need to REMOVE a constraint (e.g., after renaming a resource group), use:
+#   pcs constraint show --full          # find the constraint ID
+#   pcs constraint remove <id>
 echo "Creating ordering constraints"
 pcs constraint order zfs-pool then nfs-group \
-  2>/dev/null || echo "  (order zfs-pool->nfs-group may already exist)"
+  2>/dev/null || echo "  (order zfs-pool->nfs-group already exists)"
 pcs constraint order zfs-pool then smb-group \
-  2>/dev/null || echo "  (order zfs-pool->smb-group may already exist)"
+  2>/dev/null || echo "  (order zfs-pool->smb-group already exists)"
 pcs constraint order zfs-pool then vip-iscsi \
-  2>/dev/null || echo "  (order zfs-pool->vip-iscsi may already exist)"
+  2>/dev/null || echo "  (order zfs-pool->vip-iscsi already exists)"
 pcs constraint order zfs-pool then cockpit-group \
-  2>/dev/null || echo "  (order zfs-pool->cockpit-group may already exist)"
+  2>/dev/null || echo "  (order zfs-pool->cockpit-group already exists)"
 
 # ─── Colocation: all resources must run on the same node as zfs-pool ───────
 echo "Creating colocation constraints"
 pcs constraint colocation add nfs-group with zfs-pool INFINITY \
-  2>/dev/null || echo "  (colocation nfs-group may already exist)"
+  2>/dev/null || echo "  (colocation nfs-group already exists)"
 pcs constraint colocation add smb-group with zfs-pool INFINITY \
-  2>/dev/null || echo "  (colocation smb-group may already exist)"
+  2>/dev/null || echo "  (colocation smb-group already exists)"
 pcs constraint colocation add vip-iscsi with zfs-pool INFINITY \
-  2>/dev/null || echo "  (colocation vip-iscsi may already exist)"
+  2>/dev/null || echo "  (colocation vip-iscsi already exists)"
 pcs constraint colocation add cockpit-group with zfs-pool INFINITY \
-  2>/dev/null || echo "  (colocation cockpit-group may already exist)"
+  2>/dev/null || echo "  (colocation cockpit-group already exists)"
 
 # ─── Location: prevent resources from running on quorum node ───────────────
 # Applied to zfs-pool; colocation propagates restriction to all other resources.

@@ -35,33 +35,43 @@ LOCAL_SPECIAL="{{ special_disk.device }}"
 REMOTE_SPECIAL="FIXME:replace-with-iscsi-by-path-for-special"
 {% endif %}
 
-# ─── Auto-discover remote iSCSI disk paths ───────────────────────────────────
-echo "=== Attempting auto-discovery of iSCSI device paths ==="
+# ─── Auto-discover remote iSCSI disk paths by LUN number ─────────────────────
+# The peer target assigns LUN numbers sequentially matching local_data_disks order:
+#   LUN 0 → local_data_disks[0], LUN 1 → local_data_disks[1], …
+# We discover each LUN individually by number to guarantee correct pairing.
+# A sort-based approach is NOT used because LUN count, session count, or
+# /dev/by-path enumeration order could mismatch, silently pairing wrong disks.
+echo "=== Attempting auto-discovery of iSCSI device paths by LUN number ==="
 REMOTE_DISKS=()
-ISCSI_PATHS=()
+discovery_ok=true
 
-if iscsiadm -m session &>/dev/null 2>&1; then
-  mapfile -t ISCSI_PATHS < <(
-    ls -la /dev/disk/by-path/ 2>/dev/null |
-    grep "ip-{{ iscsi_peer_ip }}:3260" |
-    awk '{print "/dev/disk/by-path/" $9}' |
-    grep -v 'part' |
-    sort
-  )
+if ! iscsiadm -m session &>/dev/null 2>&1; then
+  echo "WARNING: No active iSCSI sessions. Cannot auto-discover remote paths."
+  discovery_ok=false
 fi
 
-if [[ ${#ISCSI_PATHS[@]} -ge ${#LOCAL_DISKS[@]} ]]; then
-  echo "Auto-discovered ${#ISCSI_PATHS[@]} remote iSCSI paths:"
-  for i in "${!ISCSI_PATHS[@]}"; do
-    echo "  LUN $i: ${ISCSI_PATHS[$i]}"
-    REMOTE_DISKS+=("${ISCSI_PATHS[$i]}")
+if [[ "${discovery_ok}" == "true" ]]; then
+  for i in "${!LOCAL_DISKS[@]}"; do
+    lun_entry=$(ls /dev/disk/by-path/ 2>/dev/null \
+      | grep "ip-{{ iscsi_peer_ip }}:3260" \
+      | grep -- "-lun-${i}$" \
+      | head -1)
+    if [[ -n "${lun_entry}" ]]; then
+      echo "  LUN ${i}: /dev/disk/by-path/${lun_entry}"
+      REMOTE_DISKS+=("/dev/disk/by-path/${lun_entry}")
+    else
+      echo "  LUN ${i}: NOT FOUND — falling back to FIXME placeholder"
+      REMOTE_DISKS+=("FIXME:lun-${i}-not-found-check-iscsi-session")
+      discovery_ok=false
+    fi
   done
-else
-  echo "Auto-discovery found ${#ISCSI_PATHS[@]} paths (need ${#LOCAL_DISKS[@]})."
-  echo "Falling back to FIXME placeholders — EDIT BEFORE RUNNING:"
-{% for disk in local_data_disks %}
-  REMOTE_DISKS+=("FIXME:replace-with-iscsi-by-path-for-lun{{ loop.index0 }}")
-{% endfor %}
+fi
+
+if [[ "${discovery_ok}" == "false" ]]; then
+  echo ""
+  echo "Auto-discovery incomplete. Fix any FIXME entries above before continuing."
+  echo "Hint: iscsiadm -m session && ls /dev/disk/by-path/ | grep iscsi"
+  echo ""
 fi
 
 # ─── Verify disks exist ────────────────────────────────────────────────────
