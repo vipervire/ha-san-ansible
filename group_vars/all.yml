@@ -55,20 +55,18 @@ corosync_transport: knet
 corosync_crypto_cipher: aes256
 corosync_crypto_hash: sha256
 
-# Node definitions for corosync.conf — ring0 = mgmt, ring1 = storage (optional)
+# Node definitions for corosync.conf
+# Ring addresses are derived automatically from host_vars:
+#   ring0_addr ← hostvars[name].mgmt_ip    (management VLAN, present on all nodes)
+#   ring1_addr ← hostvars[name].storage_ip (storage VLAN, only on storage nodes)
+# To change a node's ring address, update mgmt_ip/storage_ip in host_vars/<node>.yml.
 corosync_nodes:
   - name: storage-a
     nodeid: 1
-    ring0_addr: "10.20.20.1"
-    ring1_addr: "10.10.10.1"   # storage VLAN — redundant ring
   - name: storage-b
     nodeid: 2
-    ring0_addr: "10.20.20.2"
-    ring1_addr: "10.10.10.2"
   - name: quorum
     nodeid: 3
-    ring0_addr: "10.20.20.3"
-    # No ring1 — quorum node has no storage VLAN
 
 # ---------------------------------------------------------------------------
 # NTP
@@ -125,29 +123,3 @@ firewall_rate_limit_enabled: true
 # NFSv3 ports in firewall (111/tcp+udp, 20048) — only needed if nfs_v3_enabled: true
 # (mirrored from services role; set both consistently)
 nfs_v3_enabled: false
-
-# ---------------------------------------------------------------------------
-# Monitoring — disk health and ECC memory
-# ---------------------------------------------------------------------------
-smart_monitoring_enabled: true     # SMART disk health exporter (storage nodes only)
-ras_monitoring_enabled: false      # ECC memory monitoring via rasdaemon (not all hardware has ECC)
-
-# Alertmanager ntfy integration config — set URL to enable alertmanager.yml generation
-alertmanager_ntfy_url: ""
-
-# ---------------------------------------------------------------------------
-# Monitoring — node_exporter TLS (optional)
-# ---------------------------------------------------------------------------
-node_exporter_tls_enabled: false
-# node_exporter_cert_file: /etc/ssl/certs/node-exporter.crt
-# node_exporter_key_file: /etc/ssl/private/node-exporter.key
-# node_exporter_basic_auth_users:
-#   prometheus: "$2b$12$..."   # bcrypt hash
-
-# ---------------------------------------------------------------------------
-# Cockpit — custom TLS certificate (optional)
-# ---------------------------------------------------------------------------
-# By default Cockpit uses a self-signed cert. Provide paths to deploy your own.
-# Paths are on the Ansible controller (src:), not the target node.
-# cockpit_tls_cert_file: "/path/on/ansible/controller/cert.pem"
-# cockpit_tls_key_file:  "/path/on/ansible/controller/key.pem"

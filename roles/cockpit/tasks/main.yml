@@ -10,19 +10,14 @@
       - cockpit-packagekit
     state: present
 
-- name: Enable Cockpit socket (on quorum node only)
-  ansible.builtin.systemd:
-    name: cockpit.socket
-    enabled: true
-    state: started
-  when: inventory_hostname not in groups['storage_nodes']
-
+# Play 5 in site.yml targets storage_nodes only.
+# Pacemaker manages the Cockpit socket there (VIP follows the active node).
+# To enable Cockpit on the quorum node, add a separate play targeting quorum_node.
 - name: Disable Cockpit auto-start on storage nodes (Pacemaker manages this)
   ansible.builtin.systemd:
     name: cockpit.socket
     enabled: false
     state: stopped
-  when: inventory_hostname in groups['storage_nodes']
 
 # ─── 45Drives Houston plugins ─────────────────────────────────────────────
 # These are optional — install from 45Drives repo.
@@ -33,11 +28,17 @@
     url: https://repo.45drives.com/key/gpg
     dest: /usr/share/keyrings/45drives-archive-keyring.gpg
     mode: "0644"
+    checksum: "{{ fortyfive_drives_gpg_checksum | default(omit) }}"
+    # Set fortyfive_drives_gpg_checksum in group_vars to enforce integrity, e.g.:
+    #   fortyfive_drives_gpg_checksum: "sha256:abc123..."
+    # Obtain with: curl -s https://repo.45drives.com/key/gpg | sha256sum
   register: key_download
 
 - name: Add 45Drives apt repository
   ansible.builtin.apt_repository:
-    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/45drives-archive-keyring.gpg] https://repo.45drives.com/debian focal main"
+    repo: >-
+      deb [arch=amd64 signed-by=/usr/share/keyrings/45drives-archive-keyring.gpg]
+      https://repo.45drives.com/debian {{ ansible_distribution_release }} main
     state: present
     filename: 45drives
   when: key_download is succeeded

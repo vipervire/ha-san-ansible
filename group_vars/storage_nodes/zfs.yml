@@ -1,0 +1,110 @@
+---
+# =============================================================================
+# Storage Node Variables — ZFS pool, datasets, scrub, snapshots, replication
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# ZFS pool and dataset configuration
+# ---------------------------------------------------------------------------
+zfs_pool_name: "san-pool"
+zfs_pool_ashift: 12
+zfs_pool_options:
+  multihost: "on"
+  autotrim: "on"
+  autoreplace: "on"    # Auto-replace when a new physical disk appears in a faulted vdev's slot (iSCSI reconnect resilvering is handled by ZED auto-online, not this)
+zfs_dataset_options:
+  acltype: posixacl
+  compression: lz4
+  dnodesize: auto
+  xattr: sa
+  atime: "off"
+
+# ARC limit — dynamically calculated at deploy time as 50% of total RAM.
+# Override per-host in host_vars/<node>.yml if a specific value is needed:
+#   zfs_arc_max: 17179869184  # 16GB — explicit per-host override
+# The _zfs_arc_max fact is computed in roles/zfs/tasks/main.yml at runtime.
+
+# ZFS module tunables written to /etc/modprobe.d/zfs.conf
+# NOTE: zfs_arc_max is not listed here — it is injected dynamically by the zfs role
+zfs_modprobe_options:
+  zfs_vdev_scheduler: "none"
+  zfs_txg_timeout: 30           # Default: reduces write latency stalls; sync writes unaffected
+  zfs_resilver_min_time_ms: 27000   # 27s minimum ensures steady drive recovery (OpenZFS recommended)
+  zfs_resilver_delay: 0
+  zfs_nocacheflush: 1           # Safe: all data and SLOG devices are enterprise SSDs with hardware PLP
+
+# Datasets to create after pool exists
+zfs_datasets:
+  - name: "{{ zfs_pool_name }}/nfs"
+    properties:
+      sharenfs: "off"  # managed by /etc/exports, not ZFS
+      recordsize: "128k"
+  - name: "{{ zfs_pool_name }}/smb"
+    properties:
+      sharesmb: "off"  # managed by smb.conf
+      recordsize: "128k"
+      snapdir: visible
+  - name: "{{ zfs_pool_name }}/iscsi"
+    properties:
+      primarycache: metadata
+  - name: "{{ zfs_pool_name }}/k3s-pv"
+    properties:
+      recordsize: "128k"
+
+# ---------------------------------------------------------------------------
+# ZFS scrub automation
+# ---------------------------------------------------------------------------
+zfs_scrub_enabled: true
+zfs_scrub_schedule: "*-*-01 02:00:00"  # 1st of month at 2:00 AM
+zfs_scrub_randomized_delay_sec: 1800   # 30 minutes random delay
+zfs_scrub_skip_on_degraded: true       # Skip if pool is degraded
+zfs_scrub_min_interval_days: 25        # Minimum days between scrubs
+
+# ---------------------------------------------------------------------------
+# Sanoid snapshot policy
+# ---------------------------------------------------------------------------
+sanoid_install: true
+sanoid_datasets:
+  - name: "{{ zfs_pool_name }}/nfs"
+    template: production
+    recursive: true
+  - name: "{{ zfs_pool_name }}/smb"
+    template: production
+    recursive: true
+  - name: "{{ zfs_pool_name }}/iscsi"
+    template: vm_storage
+    recursive: true
+
+sanoid_templates:
+  production:
+    hourly: 24
+    daily: 30
+    monthly: 6
+    yearly: 0
+    autosnap: true
+    autoprune: true
+  vm_storage:
+    hourly: 12
+    daily: 14
+    monthly: 3
+    yearly: 0
+    autosnap: true
+    autoprune: true
+
+# ---------------------------------------------------------------------------
+# ZED event → ntfy push notifications
+# ---------------------------------------------------------------------------
+zed_ntfy_enabled: false
+zed_ntfy_url: "http://ntfy.example.com"    # base URL of your ntfy server
+zed_ntfy_topic: "/ha-san-alerts"
+
+# ---------------------------------------------------------------------------
+# Syncoid offsite ZFS replication (requires sanoid_install: true)
+# ---------------------------------------------------------------------------
+syncoid_enabled: false
+syncoid_schedule: "*-*-* 03:00:00"
+syncoid_targets: []
+# Example:
+# syncoid_targets:
+#   - source: "san-pool/nfs"
+#     destination: "backup@remote-host:backup-pool/san-pool-nfs"

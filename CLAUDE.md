@@ -17,8 +17,13 @@ This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI S
 ├── inventory.yml           # Hosts: storage-a (10.20.20.1), storage-b (10.20.20.2), quorum (10.20.20.3)
 ├── site.yml               # Main playbook — 6 plays with tags
 ├── group_vars/
-│   ├── all.yml            # Global vars: cluster name, VLANs, VIPs, Corosync tuning, SSH, NTP
-│   └── storage_nodes.yml  # Storage vars: ZFS, iSCSI, NFS, SMB, STONITH, Pacemaker, Sanoid, TCP tuning
+│   ├── all.yml                      # Global vars: cluster name, VLANs, VIPs, Corosync tuning, SSH, NTP
+│   └── storage_nodes/               # Storage vars split by concern (Ansible merges all files in directory)
+│       ├── network.yml              # Interface names, TCP tuning
+│       ├── zfs.yml                  # ZFS pool, datasets, scrub, Sanoid, ZED, Syncoid
+│       ├── iscsi.yml                # iSCSI backend CHAP + client-facing target
+│       ├── services.yml             # NFS exports, SMB shares
+│       └── cluster.yml              # STONITH config, Pacemaker tuning, monitoring flags
 ├── host_vars/
 │   ├── storage-a.yml      # Node-specific: IPs, iSCSI IQNs, local disk paths
 │   ├── storage-b.yml      # Node-specific: IPs, iSCSI IQNs, local disk paths
@@ -127,7 +132,7 @@ curl http://10.20.20.1:<port>  # From management VLAN
 When modifying STONITH/fencing configuration:
 
 - **File:** `roles/pacemaker/templates/configure-stonith.sh.j2`
-- **Config:** `group_vars/storage_nodes.yml` (stonith_nodes dict)
+- **Config:** `group_vars/storage_nodes/cluster.yml` (stonith_nodes dict)
 - **Test:** Always test fencing in non-production before deploying
 - **Document:** Update `docs/stonith-smart-plugs.md` if adding new fence agent types
 
@@ -150,6 +155,16 @@ stonith_nodes:
 `python3-kasa` is installed automatically if any node uses method `kasa`. See `docs/stonith-smart-plugs.md` for all plug types and `docs/stonith-migration.md` for migrating from the old `stonith_method` global variable.
 
 **Never test STONITH without a maintenance window.** `pcs stonith fence <node>` powers off the node immediately.
+
+**Fencing latency and ZFS pool start timeout:** On unplanned node failure, Pacemaker must fence the dead node before importing the ZFS pool on the survivor (`multihost=on` enforces this). The ZFS resource start timeout (150s in `configure-resources.sh`) must exceed the maximum expected fencing time. Typical latencies:
+
+| Method | Typical latency |
+|--------|----------------|
+| ipmi   | 20–30s          |
+| kasa   | 5–15s           |
+| http   | varies          |
+
+If your fence agent is slower than the default covers, increase `pcmk_reboot_timeout` in `configure-stonith.sh.j2` and the `op start timeout` in `configure-resources.sh.j2` to match.
 
 ### 3. Cockpit HA Configuration
 
@@ -195,8 +210,9 @@ Textfile exporters write `.prom` files to `/var/lib/prometheus/node-exporter/` f
 ```yaml
 # group_vars/all.yml
 ha_cluster_monitoring_enabled: true   # toggles ha_cluster_exporter
-# group_vars/storage_nodes.yml
+# group_vars/storage_nodes/cluster.yml
 zfs_scrub_monitoring_enabled: true    # toggles ZFS scrub exporter
+smart_monitoring_enabled: true        # toggles S.M.A.R.T disk health exporter
 ```
 
 ### 5. Per-Node vs. Global Configuration
@@ -215,21 +231,18 @@ zfs_scrub_monitoring_enabled: true    # toggles ZFS scrub exporter
 - Monitoring flags (`ha_cluster_monitoring_enabled`, ports)
 - SSH policy, NTP servers, admin user
 
-**Storage node settings** (`group_vars/storage_nodes.yml`):
-- ZFS pool name, ashift, pool/dataset options, modprobe tunables
-- ZFS scrub schedule (`zfs_scrub_schedule`) and monitoring toggle
-- iSCSI CHAP credentials (must be vault-encrypted in production)
-- NFS exports (`nfs_exports`), SMB shares (`smb_shares`)
-- STONITH configuration (`stonith_nodes` dict)
-- Pacemaker tuning (`pacemaker_resource_stickiness`, `pacemaker_preferred_node`, `pacemaker_standby_drain_seconds`)
-- Sanoid snapshot templates and dataset policies
-- TCP tuning for 40GbE (`tcp_tunables` dict)
+**Storage node settings** (`group_vars/storage_nodes/` — split by concern):
+- `network.yml`: Interface names (`net_storage_parent`, etc.), TCP tuning for 40GbE
+- `zfs.yml`: Pool name, ashift, pool/dataset options, modprobe tunables, scrub schedule, Sanoid, ZED, Syncoid
+- `iscsi.yml`: iSCSI CHAP credentials (must be vault-encrypted), queue depth, client target ACLs
+- `services.yml`: NFS exports (`nfs_exports`), SMB shares (`smb_shares`)
+- `cluster.yml`: STONITH configuration (`stonith_nodes` dict), Pacemaker tuning, monitoring toggles
 
 ### 6. ZFS Tunables
 
 ZFS module parameters are written to `/etc/modprobe.d/zfs.conf` via template (`roles/zfs/templates/zfs-modprobe.conf.j2`). The `zfs_arc_max` is computed dynamically (50% of total RAM) and injected separately as a fact.
 
-**Current tunables (`group_vars/storage_nodes.yml`):**
+**Current tunables (`group_vars/storage_nodes/zfs.yml`):**
 ```yaml
 zfs_modprobe_options:
   zfs_vdev_scheduler: "none"          # No I/O scheduler (SSDs only)
@@ -251,7 +264,7 @@ zfs_arc_max: 17179869184  # 16GB — explicit per-host override
 
 Sanoid is optionally installed and configured for automated ZFS snapshots:
 ```yaml
-# group_vars/storage_nodes.yml
+# group_vars/storage_nodes/zfs.yml
 sanoid_install: true     # Set false to skip Sanoid entirely
 
 sanoid_templates:

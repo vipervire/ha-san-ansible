@@ -1,0 +1,47 @@
+---
+# Reusable task file for deploying a script-based timer exporter.
+# Called via include_tasks with loop_var 'exporter'.
+#
+# Expected exporter dict keys:
+#   name         — base name used for script, .service, and .timer (required)
+#   enabled      — boolean condition (required)
+#   storage_only — true to limit to storage_nodes group (default: false)
+
+- name: "Deploy {{ exporter.name }} script"
+  ansible.builtin.template:
+    src: "{{ exporter.name }}.sh.j2"
+    dest: "/usr/local/bin/{{ exporter.name }}"
+    mode: "0755"
+  when:
+    - exporter.enabled | bool
+    - not (exporter.storage_only | default(false)) or inventory_hostname in groups['storage_nodes']
+
+- name: "Deploy {{ exporter.name }} systemd service"
+  ansible.builtin.template:
+    src: "{{ exporter.name }}.service.j2"
+    dest: "/etc/systemd/system/{{ exporter.name }}.service"
+    mode: "0644"
+  when:
+    - exporter.enabled | bool
+    - not (exporter.storage_only | default(false)) or inventory_hostname in groups['storage_nodes']
+  notify: reload systemd
+
+- name: "Deploy {{ exporter.name }} systemd timer"
+  ansible.builtin.template:
+    src: "{{ exporter.name }}.timer.j2"
+    dest: "/etc/systemd/system/{{ exporter.name }}.timer"
+    mode: "0644"
+  when:
+    - exporter.enabled | bool
+    - not (exporter.storage_only | default(false)) or inventory_hostname in groups['storage_nodes']
+  notify: reload systemd
+
+- name: "Enable {{ exporter.name }} timer"
+  ansible.builtin.systemd:
+    name: "{{ exporter.name }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - exporter.enabled | bool
+    - not (exporter.storage_only | default(false)) or inventory_hostname in groups['storage_nodes']

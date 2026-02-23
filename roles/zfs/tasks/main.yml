@@ -83,6 +83,27 @@
         enabled: true
         state: started
 
+# ─── ZFS Dataset Creation ──────────────────────────────────────────────────
+# Only runs when the pool is imported. Datasets are idempotent (state: present).
+# Properties listed in zfs_datasets are applied on every run, so this also
+# enforces dataset configuration drift correction.
+- name: Check if ZFS pool is imported
+  ansible.builtin.command:
+    cmd: zpool list {{ zfs_pool_name }}
+  register: zpool_check
+  changed_when: false
+  failed_when: false
+
+- name: Create ZFS datasets
+  community.general.zfs:
+    name: "{{ item.name }}"
+    state: present
+    extra_zfs_properties: "{{ item.properties | default({}) }}"
+  loop: "{{ zfs_datasets | default([]) }}"
+  when:
+    - zfs_datasets is defined
+    - zpool_check.rc == 0
+
 # ─── ZFS Scrub Automation ──────────────────────────────────────────────────
 - name: Deploy ZFS scrub wrapper script
   ansible.builtin.template:

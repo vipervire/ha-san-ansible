@@ -1,5 +1,5 @@
 ---
-# roles/monitoring/tasks/main.yml — Prometheus node_exporter
+# roles/monitoring/tasks/main.yml — Prometheus exporters for HA SAN nodes
 
 - name: Install prometheus-node-exporter
   ansible.builtin.apt:
@@ -47,137 +47,31 @@
     enabled: true
     state: started
 
-# ─── ZFS Scrub Metrics Exporter ────────────────────────────────────────────
-- name: Deploy ZFS scrub metrics exporter script
-  ansible.builtin.template:
-    src: zfs-scrub-exporter.sh.j2
-    dest: /usr/local/bin/zfs-scrub-exporter
-    mode: "0755"
-  when: zfs_scrub_monitoring_enabled | default(true)
+# ─── Script-based timer exporters ─────────────────────────────────────────
+# Each exporter follows the same pattern: script + .service + .timer + enable.
+# See tasks/deploy_timer_exporter.yml for the shared implementation.
+- name: Deploy timer-based exporters
+  ansible.builtin.include_tasks: deploy_timer_exporter.yml
+  loop:
+    - name: zfs-scrub-exporter
+      enabled: "{{ zfs_scrub_monitoring_enabled | default(true) }}"
+      storage_only: true
+    - name: reboot-required-exporter
+      enabled: true
+      storage_only: false
+    - name: stonith-probe
+      enabled: true
+      storage_only: true
+    - name: smart-exporter
+      enabled: "{{ smart_monitoring_enabled | default(true) }}"
+      storage_only: true
+    - name: ras-exporter
+      enabled: "{{ ras_monitoring_enabled | default(false) }}"
+      storage_only: false
+  loop_control:
+    loop_var: exporter
 
-- name: Deploy ZFS scrub exporter systemd service
-  ansible.builtin.template:
-    src: zfs-scrub-exporter.service.j2
-    dest: /etc/systemd/system/zfs-scrub-exporter.service
-    mode: "0644"
-  when: zfs_scrub_monitoring_enabled | default(true)
-  notify: reload systemd
-
-- name: Deploy ZFS scrub exporter systemd timer
-  ansible.builtin.template:
-    src: zfs-scrub-exporter.timer.j2
-    dest: /etc/systemd/system/zfs-scrub-exporter.timer
-    mode: "0644"
-  when: zfs_scrub_monitoring_enabled | default(true)
-  notify: reload systemd
-
-- name: Enable and start ZFS scrub exporter timer
-  ansible.builtin.systemd:
-    name: zfs-scrub-exporter.timer
-    enabled: true
-    state: started
-    daemon_reload: true
-  when: zfs_scrub_monitoring_enabled | default(true)
-
-# ─── Reboot-Required Exporter ──────────────────────────────────────────────
-- name: Deploy reboot-required metrics exporter script
-  ansible.builtin.template:
-    src: reboot-required-exporter.sh.j2
-    dest: /usr/local/bin/reboot-required-exporter
-    mode: "0755"
-
-- name: Deploy reboot-required exporter systemd service
-  ansible.builtin.template:
-    src: reboot-required-exporter.service.j2
-    dest: /etc/systemd/system/reboot-required-exporter.service
-    mode: "0644"
-  notify: reload systemd
-
-- name: Deploy reboot-required exporter systemd timer
-  ansible.builtin.template:
-    src: reboot-required-exporter.timer.j2
-    dest: /etc/systemd/system/reboot-required-exporter.timer
-    mode: "0644"
-  notify: reload systemd
-
-- name: Enable and start reboot-required exporter timer
-  ansible.builtin.systemd:
-    name: reboot-required-exporter.timer
-    enabled: true
-    state: started
-    daemon_reload: true
-
-# ─── STONITH Reachability Probe ────────────────────────────────────────────
-- name: Deploy STONITH probe script
-  ansible.builtin.template:
-    src: stonith-probe.sh.j2
-    dest: /usr/local/bin/stonith-probe
-    mode: "0755"
-  when: inventory_hostname in groups['storage_nodes']
-
-- name: Deploy STONITH probe systemd service
-  ansible.builtin.template:
-    src: stonith-probe.service.j2
-    dest: /etc/systemd/system/stonith-probe.service
-    mode: "0644"
-  when: inventory_hostname in groups['storage_nodes']
-  notify: reload systemd
-
-- name: Deploy STONITH probe systemd timer
-  ansible.builtin.template:
-    src: stonith-probe.timer.j2
-    dest: /etc/systemd/system/stonith-probe.timer
-    mode: "0644"
-  when: inventory_hostname in groups['storage_nodes']
-  notify: reload systemd
-
-- name: Enable and start STONITH probe timer
-  ansible.builtin.systemd:
-    name: stonith-probe.timer
-    enabled: true
-    state: started
-    daemon_reload: true
-  when: inventory_hostname in groups['storage_nodes']
-
-# ─── SMART Disk Health Monitoring ─────────────────────────────────────────
-- name: Install smartmontools
-  ansible.builtin.apt:
-    name: smartmontools
-    state: present
-  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
-
-- name: Deploy SMART health exporter script
-  ansible.builtin.template:
-    src: smart-exporter.sh.j2
-    dest: /usr/local/bin/smart-exporter
-    mode: "0755"
-  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
-
-- name: Deploy SMART exporter systemd service
-  ansible.builtin.template:
-    src: smart-exporter.service.j2
-    dest: /etc/systemd/system/smart-exporter.service
-    mode: "0644"
-  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
-  notify: reload systemd
-
-- name: Deploy SMART exporter systemd timer
-  ansible.builtin.template:
-    src: smart-exporter.timer.j2
-    dest: /etc/systemd/system/smart-exporter.timer
-    mode: "0644"
-  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
-  notify: reload systemd
-
-- name: Enable SMART exporter timer
-  ansible.builtin.systemd:
-    name: smart-exporter.timer
-    enabled: true
-    state: started
-    daemon_reload: true
-  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
-
-# ─── Memory ECC / RAS Monitoring ───────────────────────────────────────────
+# ─── rasdaemon (required by ras-exporter) ──────────────────────────────────
 - name: Install rasdaemon
   ansible.builtin.apt:
     name: rasdaemon
@@ -191,36 +85,12 @@
     state: started
   when: ras_monitoring_enabled | default(false)
 
-- name: Deploy RAS (ECC) exporter script
-  ansible.builtin.template:
-    src: ras-exporter.sh.j2
-    dest: /usr/local/bin/ras-exporter
-    mode: "0755"
-  when: ras_monitoring_enabled | default(false)
-
-- name: Deploy RAS exporter systemd service
-  ansible.builtin.template:
-    src: ras-exporter.service.j2
-    dest: /etc/systemd/system/ras-exporter.service
-    mode: "0644"
-  when: ras_monitoring_enabled | default(false)
-  notify: reload systemd
-
-- name: Deploy RAS exporter systemd timer
-  ansible.builtin.template:
-    src: ras-exporter.timer.j2
-    dest: /etc/systemd/system/ras-exporter.timer
-    mode: "0644"
-  when: ras_monitoring_enabled | default(false)
-  notify: reload systemd
-
-- name: Enable RAS exporter timer
-  ansible.builtin.systemd:
-    name: ras-exporter.timer
-    enabled: true
-    state: started
-    daemon_reload: true
-  when: ras_monitoring_enabled | default(false)
+# ─── smartmontools (required by smart-exporter) ────────────────────────────
+- name: Install smartmontools
+  ansible.builtin.apt:
+    name: smartmontools
+    state: present
+  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
 
 # ─── HA Cluster Exporter (Pacemaker/Corosync metrics) ──────────────────────
 - name: Install prometheus-hacluster-exporter
@@ -253,5 +123,5 @@
   when: >
     alertmanager_ntfy_url is defined and
     alertmanager_ntfy_url | length > 0 and
-    inventory_hostname == pacemaker_preferred_node | default('storage-a')
+    inventory_hostname == pacemaker_preferred_node
   run_once: true
