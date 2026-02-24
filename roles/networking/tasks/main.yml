@@ -17,7 +17,7 @@
     dest: /etc/sysctl.d/91-tcp-tuning.conf
     mode: "0644"
   when: tcp_tunables is defined
-  notify: reload sysctl
+  notify: reload network sysctl
 
 - name: Load tcp_bbr kernel module
   community.general.modprobe:

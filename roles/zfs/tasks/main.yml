@@ -167,7 +167,9 @@
     src: syncoid.service.j2
     dest: /etc/systemd/system/syncoid-replication.service
     mode: "0644"
-  when: syncoid_enabled | default(false) and sanoid_install | default(false)
+  when:
+    - syncoid_enabled | default(false)
+    - sanoid_install | default(false)
   notify: reload systemd
 
 - name: Deploy syncoid replication systemd timer
@@ -175,7 +177,9 @@
     src: syncoid.timer.j2
     dest: /etc/systemd/system/syncoid-replication.timer
     mode: "0644"
-  when: syncoid_enabled | default(false) and sanoid_install | default(false)
+  when:
+    - syncoid_enabled | default(false)
+    - sanoid_install | default(false)
   notify: reload systemd
 
 - name: Enable syncoid replication timer
@@ -184,4 +188,6 @@
     enabled: true
     state: started
     daemon_reload: true
-  when: syncoid_enabled | default(false) and sanoid_install | default(false)
+  when:
+    - syncoid_enabled | default(false)
+    - sanoid_install | default(false)

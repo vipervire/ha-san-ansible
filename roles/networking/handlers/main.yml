@@ -5,6 +5,6 @@
     state: restarted
   when: networking_restart_on_change | default(false)
 
-- name: reload sysctl
+- name: reload network sysctl
   ansible.builtin.command:
     cmd: sysctl --system

@@ -19,6 +19,7 @@
     dest: /etc/iscsi/iscsid.conf
     mode: "0600"
   notify: restart iscsid
+  no_log: true
 
 - name: Enable iSCSI services
   ansible.builtin.systemd:

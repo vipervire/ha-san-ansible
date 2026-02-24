@@ -33,31 +33,37 @@ pcs resource create zfs-pool ocf:heartbeat:ZFS \
   pcs resource update zfs-pool pool="{{ zfs_pool_name }}"
 
 # ─── Virtual IPs ───────────────────────────────────────────────────────────
+# nic= ensures the VIP binds to the correct VLAN interface. Without it,
+# IPaddr2 auto-detection may pick the wrong interface on multi-VLAN hosts.
 echo "Creating/updating VIP resources"
 pcs resource create vip-nfs ocf:heartbeat:IPaddr2 \
   ip="{{ vip_nfs }}" cidr_netmask={{ vip_cidr }} \
+  nic="{{ net_client_parent }}.{{ vlans.client.id }}" \
   op monitor interval=10s \
   2>/dev/null || \
-  pcs resource update vip-nfs ip="{{ vip_nfs }}" cidr_netmask={{ vip_cidr }}
+  pcs resource update vip-nfs ip="{{ vip_nfs }}" cidr_netmask={{ vip_cidr }} nic="{{ net_client_parent }}.{{ vlans.client.id }}"
 
 pcs resource create vip-smb ocf:heartbeat:IPaddr2 \
   ip="{{ vip_smb }}" cidr_netmask={{ vip_cidr }} \
+  nic="{{ net_client_parent }}.{{ vlans.client.id }}" \
   op monitor interval=10s \
   2>/dev/null || \
-  pcs resource update vip-smb ip="{{ vip_smb }}" cidr_netmask={{ vip_cidr }}
+  pcs resource update vip-smb ip="{{ vip_smb }}" cidr_netmask={{ vip_cidr }} nic="{{ net_client_parent }}.{{ vlans.client.id }}"
 
 pcs resource create vip-iscsi ocf:heartbeat:IPaddr2 \
   ip="{{ vip_iscsi }}" cidr_netmask={{ vip_cidr }} \
+  nic="{{ net_client_parent }}.{{ vlans.client.id }}" \
   op monitor interval=10s \
   2>/dev/null || \
-  pcs resource update vip-iscsi ip="{{ vip_iscsi }}" cidr_netmask={{ vip_cidr }}
+  pcs resource update vip-iscsi ip="{{ vip_iscsi }}" cidr_netmask={{ vip_cidr }} nic="{{ net_client_parent }}.{{ vlans.client.id }}"
 
 # Management VLAN VIP for Cockpit
 pcs resource create vip-cockpit ocf:heartbeat:IPaddr2 \
   ip="{{ vip_cockpit }}" cidr_netmask={{ vip_mgmt_cidr }} \
+  nic="{{ net_mgmt_interface }}" \
   op monitor interval=10s \
   2>/dev/null || \
-  pcs resource update vip-cockpit ip="{{ vip_cockpit }}" cidr_netmask={{ vip_mgmt_cidr }}
+  pcs resource update vip-cockpit ip="{{ vip_cockpit }}" cidr_netmask={{ vip_mgmt_cidr }} nic="{{ net_mgmt_interface }}"
 
 # ─── Service resources ─────────────────────────────────────────────────────
 echo "Creating service resources (idempotent — skipped if already present)"

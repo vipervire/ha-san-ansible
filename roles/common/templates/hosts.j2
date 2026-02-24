@@ -4,13 +4,13 @@
 
 # Cluster nodes — management VLAN
 {% for node in corosync_nodes %}
-{{ node.ring0_addr }}    {{ node.name }}
+{{ hostvars[node.name].mgmt_ip }}    {{ node.name }}
 {% endfor %}
 
 # Storage interconnect (private)
 {% for node in corosync_nodes %}
-{% if node.ring1_addr is defined %}
-{{ node.ring1_addr }}    {{ node.name }}-stor
+{% if hostvars[node.name].storage_ip is defined %}
+{{ hostvars[node.name].storage_ip }}    {{ node.name }}-stor
 {% endif %}
 {% endfor %}
 

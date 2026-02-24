@@ -18,6 +18,7 @@
     src: setup-lio-target.sh.j2
     dest: /root/setup-lio-target.sh
     mode: "0700"
+  no_log: true
 
 - name: Check if iSCSI target already configured
   ansible.builtin.command:

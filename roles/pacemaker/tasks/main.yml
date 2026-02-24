@@ -24,12 +24,21 @@
   ansible.builtin.user:
     name: hacluster
     password: "{{ hacluster_password | password_hash('sha512') }}"
+  no_log: true
 
 - name: Enable pcsd service
   ansible.builtin.systemd:
     name: pcsd
     enabled: true
     state: started
+
+- name: Back up corosync.conf before update
+  ansible.builtin.copy:
+    src: /etc/corosync/corosync.conf
+    dest: /etc/corosync/corosync.conf.bak
+    remote_src: true
+    mode: "0644"
+  failed_when: false
 
 - name: Deploy corosync.conf
   ansible.builtin.template:
@@ -59,6 +68,7 @@
   delegate_to: "{{ pacemaker_preferred_node }}"
   changed_when: false
   failed_when: false
+  no_log: true
 
 - name: Check if cluster exists
   ansible.builtin.command:
@@ -169,3 +179,4 @@
     dest: /root/configure-stonith.sh
     mode: "0700"
   when: inventory_hostname == pacemaker_preferred_node
+  no_log: true

@@ -16,7 +16,7 @@
     src: 90-hardening.conf.j2
     dest: /etc/sysctl.d/90-hardening.conf
     mode: "0644"
-  notify: reload sysctl
+  notify: reload hardening sysctl
 
 # ─── nftables Firewall ────────────────────────────────────────────────────
 - name: Install nftables
