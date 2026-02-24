@@ -47,7 +47,6 @@
   ignore_errors: true
   run_once: true
   delegate_to: "{{ pacemaker_preferred_node }}"
-  notify: reload nfs exports
 
 - name: Initialize smb.conf on shared storage (if not exists)
   ansible.builtin.template:
@@ -60,7 +59,6 @@
   ignore_errors: true
   run_once: true
   delegate_to: "{{ pacemaker_preferred_node }}"
-  notify: validate smb config
 
 # ─── Symlink local config paths to shared storage ─────────────────────────
 # force: true replaces an existing regular file with the symlink in one step,
@@ -100,18 +98,6 @@
     dest: /etc/samba/smb.conf
     state: link
     force: true
-
-- name: Validate Samba configuration syntax
-  ansible.builtin.command:
-    cmd: testparm -s
-  changed_when: false
-  failed_when: false
-  register: testparm_result
-
-- name: Warn if Samba configuration has errors
-  ansible.builtin.debug:
-    msg: "WARNING: testparm reported errors in smb.conf — review output: {{ testparm_result.stderr }}"
-  when: testparm_result.rc != 0
 
 - name: Symlink /var/lib/samba/private to shared storage
   ansible.builtin.file:

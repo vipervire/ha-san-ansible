@@ -3,12 +3,3 @@
   ansible.builtin.systemd:
     name: corosync
     state: restarted
-
-- name: restart pacemaker
-  ansible.builtin.systemd:
-    name: pacemaker
-    state: restarted
-
-- name: reload systemd
-  ansible.builtin.systemd:
-    daemon_reload: true

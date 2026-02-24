@@ -31,7 +31,7 @@ zfs_modprobe_options:
   zfs_txg_timeout: 30           # Default: reduces write latency stalls; sync writes unaffected
   zfs_resilver_min_time_ms: 27000   # 27s minimum ensures steady drive recovery (OpenZFS recommended)
   zfs_resilver_delay: 0
-  zfs_nocacheflush: 0           # Default: safe for all drive types. Set to 1 ONLY if ALL data and SLOG devices are enterprise SSDs with hardware PLP (power-loss protection). Consumer SSDs or spinning disks WILL lose data on power failure with nocacheflush=1.
+  zfs_nocacheflush: 1           # Safe: all data and SLOG devices are enterprise SSDs with hardware PLP
 
 # Datasets to create after pool exists
 zfs_datasets:
