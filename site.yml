@@ -85,6 +85,17 @@
         iscsi_mutual_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_mutual_chap_password | default('') }}"
       when: hostvars[groups['storage_nodes'][0]].iscsi_mutual_chap_enabled | default(false) | bool
 
+    - name: Assert client-facing iSCSI CHAP password is set when enabled
+      ansible.builtin.assert:
+        that:
+          - iscsi_client_chap_password | length > 0
+        fail_msg: |
+          CONFIGURATION ERROR: iscsi_client_chap_enabled is true but iscsi_client_chap_password is empty.
+          Set a vault-encrypted password in group_vars/storage_nodes or roles/services defaults.
+      vars:
+        iscsi_client_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_client_chap_password | default('') }}"
+      when: hostvars[groups['storage_nodes'][0]].iscsi_client_chap_enabled | default(false) | bool
+
 # ─── Pre-run: Warn if cluster is already deployed and degraded ──────────────
 - name: "Pre-run cluster health check (storage nodes)"
   hosts: storage_nodes

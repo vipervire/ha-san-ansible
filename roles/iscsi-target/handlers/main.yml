@@ -1,0 +1,5 @@
+---
+- name: save lio config
+  ansible.builtin.command:
+    cmd: targetcli saveconfig
+  changed_when: true

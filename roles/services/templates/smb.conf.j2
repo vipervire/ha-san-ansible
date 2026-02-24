@@ -42,7 +42,8 @@
     vfs objects = shadow_copy2
     shadow:snapdir = .zfs/snapshot
     shadow:sort = desc
-    shadow:format = autosnap_%Y-%m-%d_%H:%M:%S_hourly
+    shadow:snapprefix = ^autosnap_
+    shadow:format = %%Y-%%m-%%d_%%H:%%M:%%S_
 {% endif %}
 
 {% endfor %}

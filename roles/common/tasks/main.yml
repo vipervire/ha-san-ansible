@@ -40,7 +40,7 @@
       - modemmanager
     state: absent
     purge: true
-  ignore_errors: true  # some may not be installed
+  failed_when: false  # some may not be installed
 
 - name: Autoremove orphaned packages
   ansible.builtin.apt:

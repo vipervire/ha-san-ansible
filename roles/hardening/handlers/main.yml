@@ -4,7 +4,7 @@
     name: sshd
     state: restarted
 
-- name: reload sysctl
+- name: reload hardening sysctl
   ansible.builtin.command:
     cmd: sysctl --system
 
