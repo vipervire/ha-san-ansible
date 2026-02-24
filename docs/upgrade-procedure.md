@@ -1,5 +1,9 @@
 # Rolling Cluster Upgrade Procedure
 
+> **Automated approach available:** See `docs/os-upgrade.md` for using the
+> `os-upgrade.yml` playbook which automates health checks, standby/failover, and
+> post-upgrade verification. The manual steps below remain valid as a reference.
+
 This document describes how to perform a rolling upgrade of the HA SAN cluster (kernel, ZFS DKMS, Pacemaker/Corosync, or OS packages) with zero downtime for clients.
 
 ## Pre-Upgrade Checklist

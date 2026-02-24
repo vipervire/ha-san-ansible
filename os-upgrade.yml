@@ -1,0 +1,401 @@
+---
+# =============================================================================
+# HA ZFS-over-iSCSI SAN — Rolling OS Upgrade Helper
+# =============================================================================
+#
+# ALWAYS run with --limit targeting a SINGLE node at a time.
+#
+# Pre-upgrade (prepare node for OS upgrade):
+#   ansible-playbook -i inventory.yml os-upgrade.yml --tags pre-upgrade --limit storage-b
+#
+# Post-upgrade (verify and rejoin after upgrade):
+#   ansible-playbook -i inventory.yml os-upgrade.yml --tags post-upgrade --limit storage-b
+#
+# Optional extra var:
+#   -e force_upgrade=true    # bypass failed-resource-actions check (pre-upgrade only)
+#
+# Recommended upgrade order:
+#   1. quorum     — no storage impact; cluster retains quorum throughout
+#   2. storage-b  — standby node; degrades ZFS mirror, clients unaffected
+#   3. storage-a  — active node; triggers planned failover to storage-b
+#
+# See docs/os-upgrade.md for the complete step-by-step procedure.
+#
+
+# ─── Play 1: Pre-upgrade safety checks and standby ──────────────────────────
+- name: "Pre-upgrade: prepare node for OS upgrade"
+  hosts: all
+  gather_facts: false
+  become: true
+  tags: [pre-upgrade]
+
+  tasks:
+
+    - name: Assert single-node limit is in effect
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts | length == 1
+        fail_msg: |
+          ERROR: This playbook must target exactly one node at a time.
+          Use --limit to specify a single node:
+            ansible-playbook -i inventory.yml os-upgrade.yml --tags pre-upgrade --limit storage-b
+      run_once: true
+
+    # ── Cluster health checks ────────────────────────────────────────────────
+
+    - name: Check Pacemaker cluster status
+      ansible.builtin.command:
+        cmd: pcs status
+      register: pcs_status_output
+      changed_when: false
+      failed_when: pcs_status_output.rc != 0
+
+    - name: Check Corosync quorum
+      ansible.builtin.command:
+        cmd: corosync-quorumtool -s
+      register: quorum_output
+      changed_when: false
+      failed_when: false
+
+    - name: Assert cluster has quorum
+      ansible.builtin.assert:
+        that:
+          - "'Quorate: Yes' in quorum_output.stdout"
+        fail_msg: |
+          ABORT: Cluster does not have quorum.
+          corosync-quorumtool output:
+          {{ quorum_output.stdout }}
+
+          Investigate quorum state before proceeding.
+
+    - name: Assert no failed resource actions
+      ansible.builtin.assert:
+        that:
+          - >-
+            force_upgrade | default(false) | bool
+            or (
+              'Failed Resource Actions' not in pcs_status_output.stdout
+              and 'Failed Actions' not in pcs_status_output.stdout
+            )
+        fail_msg: |
+          ABORT: Pacemaker reports failed resource actions.
+          pcs status output:
+          {{ pcs_status_output.stdout }}
+
+          Resolve failures before upgrading, or bypass with: -e force_upgrade=true
+
+    # ── Storage-node-only: ZFS pool health check ─────────────────────────────
+
+    - name: Get Pacemaker resource list (storage nodes)
+      ansible.builtin.command:
+        cmd: pcs status resources
+      register: pcs_resources_output
+      changed_when: false
+      when: inventory_hostname in groups['storage_nodes']
+
+    - name: Determine which node has the ZFS pool imported (storage nodes)
+      ansible.builtin.set_fact:
+        _zfs_active_node: >-
+          {{
+            pcs_resources_output.stdout
+            | regex_findall('zfs-pool[^\n]*Started ([^ \t\n]+)')
+            | first
+            | default('')
+          }}
+      when: inventory_hostname in groups['storage_nodes']
+
+    - name: Check ZFS pool health on active node (storage nodes)
+      ansible.builtin.command:
+        cmd: "zpool status {{ zfs_pool_name }}"
+      register: zpool_status_output
+      changed_when: false
+      delegate_to: "{{ _zfs_active_node }}"
+      when:
+        - inventory_hostname in groups['storage_nodes']
+        - (_zfs_active_node | default('')) | length > 0
+
+    - name: Assert ZFS pool is not degraded or resilvering (storage nodes)
+      ansible.builtin.assert:
+        that:
+          - "'DEGRADED' not in zpool_status_output.stdout"
+          - "'FAULTED' not in zpool_status_output.stdout"
+          - "'resilver' not in zpool_status_output.stdout"
+        fail_msg: |
+          ABORT: ZFS pool is not in a healthy state on {{ _zfs_active_node }}.
+          zpool status output:
+          {{ zpool_status_output.stdout }}
+
+          Wait for any resilver to complete before upgrading.
+      when:
+        - inventory_hostname in groups['storage_nodes']
+        - (_zfs_active_node | default('')) | length > 0
+
+    # ── Pre-upgrade summary ──────────────────────────────────────────────────
+
+    - name: Classify node role for summary
+      ansible.builtin.set_fact:
+        _is_storage_node: "{{ inventory_hostname in groups['storage_nodes'] }}"
+        _is_quorum_node: "{{ inventory_hostname in groups['quorum_node'] }}"
+        _is_active_storage: >-
+          {{
+            inventory_hostname in groups['storage_nodes']
+            and (_zfs_active_node | default('')) == inventory_hostname
+          }}
+        _is_standby_storage: >-
+          {{
+            inventory_hostname in groups['storage_nodes']
+            and (_zfs_active_node | default('')) != inventory_hostname
+          }}
+
+    - name: Display pre-upgrade summary
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════
+          PRE-UPGRADE SUMMARY for {{ inventory_hostname }}
+          ═══════════════════════════════════════════════════════════
+          {% if _is_active_storage %}
+          Role: ACTIVE storage node (ZFS pool running on THIS node)
+          Impact: Upgrading will trigger a PLANNED FAILOVER.
+                  Resources will migrate to the peer storage node.
+                  Clients will experience a brief interruption (~5-10s).
+          {% elif _is_standby_storage %}
+          Role: STANDBY storage node (ZFS pool on {{ _zfs_active_node | default('unknown') }})
+          Impact: Putting this node in standby degrades the ZFS mirror.
+                  Clients are UNAFFECTED. Pool resilvering begins on rejoin.
+          {% elif _is_quorum_node %}
+          Role: QUORUM node (no storage role)
+          Impact: Temporarily reduces cluster votes to 2/3 during upgrade.
+                  Cluster retains quorum. No storage impact.
+          {% else %}
+          Role: Unknown
+          {% endif %}
+
+          Pacemaker status:
+          {{ pcs_status_output.stdout | indent(10) }}
+          ═══════════════════════════════════════════════════════════
+
+    - name: Pause for operator review before putting node in standby
+      ansible.builtin.pause:
+        prompt: |
+          Review the summary above.
+          Press ENTER to put {{ inventory_hostname }} in standby and proceed,
+          or Ctrl-C then A to abort.
+
+    # ── Put node in standby ──────────────────────────────────────────────────
+
+    - name: Put node in standby
+      ansible.builtin.command:
+        cmd: "pcs node standby {{ inventory_hostname }}"
+      changed_when: true
+
+    - name: Wait for all resources to migrate away from this node (storage nodes)
+      ansible.builtin.command:
+        cmd: pcs status resources
+      register: _pcs_resources_check
+      changed_when: false
+      until: >-
+        not (_pcs_resources_check.stdout | regex_search('Started ' + inventory_hostname))
+      retries: 30
+      delay: 5
+      when: inventory_hostname in groups['storage_nodes']
+
+    # ── Next steps ───────────────────────────────────────────────────────────
+
+    - name: Print next steps for operator
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════
+          {{ inventory_hostname }} is now in STANDBY. Next steps:
+          ═══════════════════════════════════════════════════════════
+
+          1. Upgrade the OS on {{ inventory_hostname }}:
+
+             ssh {{ inventory_hostname }}
+             sudo apt update && sudo apt full-upgrade -y
+             # For a dist-upgrade (Debian major version bump), also:
+             # sudo sed -i 's/bookworm/trixie/g' /etc/apt/sources.list.d/*.list
+             # sudo apt update && sudo apt full-upgrade -y && sudo apt autoremove -y
+             sudo reboot
+
+          2. Wait for {{ inventory_hostname }} to come back online (~2-3 min).
+
+          3. Re-apply Ansible configuration to {{ inventory_hostname }}:
+             ansible-playbook -i inventory.yml site.yml --limit {{ inventory_hostname }}
+
+          4. Run post-upgrade verification:
+             ansible-playbook -i inventory.yml os-upgrade.yml --tags post-upgrade --limit {{ inventory_hostname }}
+
+          See docs/os-upgrade.md for the full procedure and edge cases.
+          ═══════════════════════════════════════════════════════════
+
+
+# ─── Play 2: Post-upgrade verification and cluster rejoin ───────────────────
+- name: "Post-upgrade: verify and rejoin node after OS upgrade"
+  hosts: all
+  gather_facts: false
+  become: true
+  tags: [post-upgrade]
+
+  tasks:
+
+    - name: Assert single-node limit is in effect
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts | length == 1
+        fail_msg: |
+          ERROR: This playbook must target exactly one node at a time.
+          Use --limit to specify a single node:
+            ansible-playbook -i inventory.yml os-upgrade.yml --tags post-upgrade --limit storage-b
+      run_once: true
+
+    # ── Service health checks ────────────────────────────────────────────────
+
+    - name: Verify Pacemaker service is active
+      ansible.builtin.command:
+        cmd: systemctl is-active pacemaker
+      register: pacemaker_active
+      changed_when: false
+      failed_when: pacemaker_active.stdout.strip() != 'active'
+
+    - name: Verify Corosync cluster membership
+      ansible.builtin.command:
+        cmd: corosync-cmapctl runtime.members
+      register: corosync_members
+      changed_when: false
+      failed_when: corosync_members.rc != 0
+
+    - name: Display Corosync membership
+      ansible.builtin.debug:
+        msg: "Corosync members:\n{{ corosync_members.stdout }}"
+
+    # ── Storage-node-only: iSCSI checks ─────────────────────────────────────
+
+    - name: Verify iSCSI target is configured (storage nodes)
+      ansible.builtin.command:
+        cmd: "targetcli ls /iscsi/{{ iscsi_target_iqn }}"
+      register: targetcli_output
+      changed_when: false
+      failed_when: targetcli_output.rc != 0
+      when: inventory_hostname in groups['storage_nodes']
+
+    - name: Check iSCSI initiator sessions (storage nodes)
+      ansible.builtin.command:
+        cmd: iscsiadm -m session
+      register: iscsi_sessions
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups['storage_nodes']
+
+    - name: Reconnect iSCSI sessions if peer session is missing (storage nodes)
+      ansible.builtin.command:
+        cmd: iscsiadm -m node --loginall=automatic
+      changed_when: true
+      failed_when: false
+      when:
+        - inventory_hostname in groups['storage_nodes']
+        - iscsi_peer_iqn not in (iscsi_sessions.stdout | default(''))
+
+    - name: Re-check iSCSI sessions after reconnect attempt (storage nodes)
+      ansible.builtin.command:
+        cmd: iscsiadm -m session
+      register: iscsi_sessions_final
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups['storage_nodes']
+
+    - name: Assert peer iSCSI session is established (storage nodes)
+      ansible.builtin.assert:
+        that:
+          - iscsi_peer_iqn in (iscsi_sessions_final.stdout | default(''))
+        fail_msg: |
+          WARNING: iSCSI session to peer ({{ iscsi_peer_iqn }} at {{ iscsi_peer_ip }}) is not established.
+
+          Manual recovery:
+            ssh {{ inventory_hostname }}
+            sudo iscsiadm -m node --loginall=automatic
+            sudo iscsiadm -m session
+
+          The ZFS mirror will remain degraded until the iSCSI session reconnects.
+          Check network connectivity on the storage VLAN ({{ iscsi_peer_ip }}).
+      when: inventory_hostname in groups['storage_nodes']
+
+    # ── Unstandby and rejoin ─────────────────────────────────────────────────
+
+    - name: Remove node from standby
+      ansible.builtin.command:
+        cmd: "pcs node unstandby {{ inventory_hostname }}"
+      changed_when: true
+
+    - name: Wait for cluster to settle after unstandby
+      ansible.builtin.pause:
+        seconds: 10
+
+    - name: Get cluster status after rejoin
+      ansible.builtin.command:
+        cmd: pcs status
+      register: pcs_status_after
+      changed_when: false
+
+    # ── Storage-node-only: ZFS pool status after rejoin ──────────────────────
+
+    - name: Get Pacemaker resource list after rejoin (storage nodes)
+      ansible.builtin.command:
+        cmd: pcs status resources
+      register: pcs_resources_after
+      changed_when: false
+      when: inventory_hostname in groups['storage_nodes']
+
+    - name: Determine active node for ZFS pool after rejoin (storage nodes)
+      ansible.builtin.set_fact:
+        _zfs_active_node_after: >-
+          {{
+            pcs_resources_after.stdout
+            | regex_findall('zfs-pool[^\n]*Started ([^ \t\n]+)')
+            | first
+            | default('')
+          }}
+      when: inventory_hostname in groups['storage_nodes']
+
+    - name: Check ZFS pool status on active node after rejoin (storage nodes)
+      ansible.builtin.command:
+        cmd: "zpool status {{ zfs_pool_name }}"
+      register: zpool_status_after
+      changed_when: false
+      delegate_to: "{{ _zfs_active_node_after }}"
+      when:
+        - inventory_hostname in groups['storage_nodes']
+        - (_zfs_active_node_after | default('')) | length > 0
+
+    # ── Post-upgrade summary ─────────────────────────────────────────────────
+
+    - name: Print post-upgrade summary
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════
+          POST-UPGRADE SUMMARY for {{ inventory_hostname }}
+          ═══════════════════════════════════════════════════════════
+          {% if inventory_hostname in groups['storage_nodes'] %}
+          ZFS pool is running on: {{ _zfs_active_node_after | default('unknown') }}
+
+          {% if zpool_status_after is defined and zpool_status_after.skipped is not defined %}
+          {% if 'resilver' in zpool_status_after.stdout %}
+          Pool status: RESILVERING in progress (normal after storage node rejoin)
+            ⚠  Wait for resilver to complete before upgrading the next node.
+            Monitor: ssh {{ _zfs_active_node_after }} 'watch zpool status {{ zfs_pool_name }}'
+          {% elif 'DEGRADED' in zpool_status_after.stdout %}
+          Pool status: DEGRADED — investigate before upgrading the next node.
+            Check: ssh {{ _zfs_active_node_after }} 'zpool status {{ zfs_pool_name }}'
+          {% elif 'ONLINE' in zpool_status_after.stdout %}
+          Pool status: ONLINE — safe to proceed with upgrading the next node.
+          {% else %}
+          Pool status (raw):
+          {{ zpool_status_after.stdout | indent(12) }}
+          {% endif %}
+          {% endif %}
+          {% else %}
+          Node rejoined the cluster successfully.
+          {% endif %}
+
+          Cluster status:
+          {{ pcs_status_after.stdout | indent(10) }}
+          ═══════════════════════════════════════════════════════════

@@ -113,6 +113,7 @@ ansible-playbook -i inventory.yml site.yml --tags monitoring # node_exporter
 ```
 ha-san-ansible/
 ├── site.yml                    # Main playbook
+├── os-upgrade.yml              # Rolling OS upgrade helper (always use --limit)
 ├── inventory.yml               # Host inventory
 ├── group_vars/
 │   ├── all.yml                 # Cluster-wide variables
@@ -269,6 +270,23 @@ systemctl status prometheus-hacluster-exporter
 systemctl status stonith-probe.timer
 systemctl status reboot-required-exporter.timer
 ```
+
+## Rolling OS Upgrade
+
+Use `os-upgrade.yml` to upgrade one node at a time with automated health checks and failover handling. See `docs/os-upgrade.md` for the full procedure.
+
+```bash
+# Pre-upgrade: safety checks, standby, failover (if active node)
+ansible-playbook -i inventory.yml os-upgrade.yml --tags pre-upgrade --limit storage-b
+
+# (Upgrade the OS manually, then re-apply Ansible)
+ansible-playbook -i inventory.yml site.yml --limit storage-b
+
+# Post-upgrade: verify services, iSCSI, rejoin cluster
+ansible-playbook -i inventory.yml os-upgrade.yml --tags post-upgrade --limit storage-b
+```
+
+Upgrade order: quorum → standby storage node → active storage node.
 
 ## Re-Deploying and Rollback
 

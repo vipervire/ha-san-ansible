@@ -16,6 +16,7 @@ This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI S
 .
 ├── inventory.yml           # Hosts: storage-a (10.20.20.1), storage-b (10.20.20.2), quorum (10.20.20.3)
 ├── site.yml               # Main playbook — 6 plays with tags
+├── os-upgrade.yml         # Rolling OS upgrade helper — pre/post-upgrade plays, always use --limit
 ├── group_vars/
 │   ├── all.yml                      # Global vars: cluster name, VLANs, VIPs, Corosync tuning, SSH, NTP
 │   └── storage_nodes/               # Storage vars split by concern (Ansible merges all files in directory)
@@ -49,7 +50,9 @@ This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI S
     ├── prometheus-alerts.yml      # Alert rule examples
     ├── prometheus-recording-rules.yml  # Recording rules for aggregation
     ├── stonith-migration.md       # Migrating from old global stonith_method to per-node dict
-    └── stonith-smart-plugs.md     # Smart plug fencing guide (Kasa, Tasmota, ESPHome, HTTP)
+    ├── stonith-smart-plugs.md     # Smart plug fencing guide (Kasa, Tasmota, ESPHome, HTTP)
+    ├── os-upgrade.md              # Rolling OS upgrade guide — dist-upgrade and full reinstall
+    └── upgrade-procedure.md       # Manual upgrade reference (pre-dates os-upgrade.yml)
 ```
 
 ## Playbook Tags
@@ -80,6 +83,10 @@ ansible-playbook -i inventory.yml site.yml --tags monitoring
 
 # Dry run with diff:
 ansible-playbook -i inventory.yml site.yml --check --diff
+
+# Rolling OS upgrade — always target one node at a time with --limit:
+ansible-playbook -i inventory.yml os-upgrade.yml --tags pre-upgrade --limit storage-b
+ansible-playbook -i inventory.yml os-upgrade.yml --tags post-upgrade --limit storage-b
 ```
 
 ## Critical Checks When Making Changes
@@ -354,6 +361,30 @@ hacluster_password: !vault |
 3. Run: `ansible-playbook -i inventory.yml site.yml --tags storage`
 4. Note: the `zpool create` step is always manual (verify iSCSI paths first)
 
+### Rolling OS Upgrade
+
+Always target **one node at a time** with `--limit`. Recommended order: quorum → standby storage node → active storage node.
+
+```bash
+# 1. Pre-upgrade: health checks, optional failover, put node in standby
+ansible-playbook -i inventory.yml os-upgrade.yml --tags pre-upgrade --limit storage-b
+
+# 2. Upgrade the node manually (SSH in and run apt, then reboot)
+
+# 3. Re-apply Ansible configuration to the upgraded node
+ansible-playbook -i inventory.yml site.yml --limit storage-b
+
+# 4. Post-upgrade: verify services, reconnect iSCSI, remove standby
+ansible-playbook -i inventory.yml os-upgrade.yml --tags post-upgrade --limit storage-b
+
+# 5. Wait for ZFS resilver before upgrading the next node (storage nodes only)
+#    ssh storage-a 'watch zpool status san-pool'
+```
+
+Bypass failed-resource-actions check (pre-upgrade only): `-e force_upgrade=true`
+
+See `docs/os-upgrade.md` for the full procedure, edge cases, and rollback steps.
+
 ## Known Issues / Gotchas
 
 ### 1. ZFS Pool Creation Is Manual
@@ -474,6 +505,7 @@ ssh storage-b 'zpool status san-pool'
 
 ## Change Log
 
+- **2026-02-23**: Added `os-upgrade.yml` rolling upgrade playbook and `docs/os-upgrade.md` — automates pre-upgrade health checks, standby/failover, iSCSI verification, and post-upgrade rejoin
 - **2026-02-20**: Comprehensive CLAUDE.md update — added architecture overview, playbook tags, new monitoring exporters (stonith-probe, reboot-required-exporter), ZFS tunable notes, Sanoid snapshot policy, complete firewall port table, NFS security doc, dataset best practices doc, HTML design/ops docs, stonith-migration doc, full deployment workflow
 - **2025-02-16**: Added Cockpit HA configuration (VIP + shared storage config sync)
 - **2025-02-16**: Added mixed STONITH configuration support (per-node methods)
