@@ -83,7 +83,35 @@
       vars:
         iscsi_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_chap_password | default('') }}"
         iscsi_mutual_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_mutual_chap_password | default('') }}"
-      when: hostvars[groups['storage_nodes'][0]].iscsi_mutual_chap_enabled | default(false) | bool
+
+    - name: Assert disk paths are not placeholders
+      ansible.builtin.assert:
+        that:
+          - _all_disk_paths | select('search', 'PLACEHOLDER') | list | length == 0
+        fail_msg: |
+          CONFIGURATION ERROR: Placeholder disk paths detected in host_vars.
+          Replace all PLACEHOLDER_DISK_* paths with real /dev/disk/by-id/ paths.
+          Run on each storage node:
+            ls -la /dev/disk/by-id/ | grep -v part | grep -v wwn
+          Then update host_vars/storage-a.yml and host_vars/storage-b.yml accordingly.
+      vars:
+        _all_disk_paths: >-
+          {{
+            groups['storage_nodes']
+            | map('extract', hostvars, 'local_data_disks')
+            | flatten
+            | map(attribute='device')
+            | list
+          }}
+
+    - name: Assert corosync_token is not below safe minimum
+      ansible.builtin.assert:
+        that:
+          - (corosync_token | int) >= 3000
+        fail_msg: |
+          CONFIGURATION ERROR: corosync_token is set to {{ corosync_token }}ms (minimum: 3000ms).
+          Values below 3000ms cause false-positive node death declarations on busy networks.
+          Recommended value: 4000ms. Set in group_vars/all.yml.
 
 # ─── Pre-run: Warn if cluster is already deployed and degraded ──────────────
 - name: "Pre-run cluster health check (storage nodes)"
