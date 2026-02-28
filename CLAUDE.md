@@ -161,6 +161,15 @@ stonith_nodes:
 
 `python3-kasa` is installed automatically if any node uses method `kasa`. See `docs/stonith-smart-plugs.md` for all plug types and `docs/stonith-migration.md` for migrating from the old `stonith_method` global variable.
 
+**Post-fence verification** is enabled by default (`stonith_fence_verify: true`). After the primary fence agent runs, a custom `fence_check` agent queries the STONITH device power state and pings the target on all three VLANs. If either check fails, Pacemaker considers fencing incomplete and **blocks failover** to prevent split-brain. Both agents are placed in **fencing level 1** — all must succeed for fencing to complete:
+
+```bash
+pcs stonith level    # Should show: Level 1 - storage-b: fence-storage-b,fence-verify-storage-b
+fence_check -o status -n storage-b    # Non-destructive manual check
+```
+
+To disable: set `stonith_fence_verify: false` in `group_vars/storage_nodes.yml`, re-run the playbook, and re-run `configure-stonith.sh`. See `docs/stonith-smart-plugs.md#post-fence-verification` for troubleshooting a blocked failover.
+
 **Never test STONITH without a maintenance window.** `pcs stonith fence <node>` powers off the node immediately.
 
 **Fencing latency and ZFS pool start timeout:** On unplanned node failure, Pacemaker must fence the dead node before importing the ZFS pool on the survivor (`multihost=on` enforces this). The ZFS resource start timeout (150s in `configure-resources.sh`) must exceed the maximum expected fencing time. Typical latencies:

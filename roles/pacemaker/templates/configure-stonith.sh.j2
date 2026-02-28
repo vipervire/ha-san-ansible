@@ -88,12 +88,55 @@ echo "         Skipping fence agent creation for this node."
 echo "         Valid methods: ipmi, kasa, tasmota, esphome, http"
 
 {% endif %}
+{% if stonith_fence_verify | default(true) %}
+# ─── Post-fence verification agent for {{ node_name }} ───────────────────
+echo "Creating post-fence verification agent for {{ node_name }}"
+pcs stonith create fence-verify-{{ node_name }} fence_check \
+  fence_method="{{ node_cfg.method }}" \
+  fence_ip="{{ node_cfg.ip }}" \
+  fence_user="{{ node_cfg.user | default('') }}" \
+  fence_pass="{{ node_cfg.password | default('') }}" \
+  target_mgmt_ip="{{ hostvars[node_name].mgmt_ip }}" \
+  target_storage_ip="{{ hostvars[node_name].storage_ip }}" \
+  target_client_ip="{{ hostvars[node_name].client_ip }}" \
+  verify_wait="10" \
+{% if node_cfg.method == 'esphome' %}
+  switch_name="{{ node_cfg.switch_name | default('relay') }}" \
+{% elif node_cfg.method == 'http' %}
+  status_url="{{ node_cfg.status_url }}" \
+  status_on_regex="{{ node_cfg.status_on_regex | default('ON') }}" \
+  status_off_regex="{{ node_cfg.status_off_regex | default('OFF') }}" \
+{% endif %}
+  pcmk_host_list="{{ node_name }}" \
+  op monitor interval=0 2>/dev/null || \
+  echo "  (fence-verify-{{ node_name }} may already exist)"
+
+pcs constraint location fence-verify-{{ node_name }} avoids quorum=INFINITY 2>/dev/null || true
+
+{% endif %}
 {% endfor %}
 
 # Prevent STONITH resources from running on quorum node
 {% for node_name in stonith_nodes.keys() %}
 pcs constraint location fence-{{ node_name }} avoids quorum=INFINITY 2>/dev/null || true
 {% endfor %}
+
+{% if stonith_fence_verify | default(true) %}
+# ─── Fencing topology: real fence + verification must both succeed ─────────
+# Both fence-<node> and fence-verify-<node> are placed in fencing level 1.
+# ALL agents in a level must succeed for fencing to complete.
+# If fence-verify-<node> fails (node still alive), Pacemaker blocks failover.
+echo "Configuring fencing topology (post-fence verification required)"
+{% for node_name in stonith_nodes.keys() %}
+pcs stonith level add 1 {{ node_name }} fence-{{ node_name }},fence-verify-{{ node_name }} \
+  2>/dev/null || echo "  (fencing level for {{ node_name }} may already exist)"
+{% endfor %}
+
+echo ""
+echo "Fencing topology set — both primary fence AND verification must succeed."
+echo "If fence-verify-<node> fails, failover is BLOCKED (split-brain prevention)."
+echo "To disable: set stonith_fence_verify: false and re-run this script."
+{% endif %}
 
 echo "=== STONITH configuration complete ==="
 echo "Test with: pcs stonith fence storage-b  (BE CAREFUL — this WILL power off the node)"

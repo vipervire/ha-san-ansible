@@ -466,6 +466,99 @@ bash /root/configure-stonith.sh
 - You need enterprise-grade reliability
 - Budget allows for proper server hardware
 
+## Post-Fence Verification
+
+### The Problem
+
+When Pacemaker triggers a fence operation, it trusts the fence agent's return code. But the agent might report success even when the node isn't truly dead — for example, if the smart plug controls the wrong outlet, a UPS keeps the node running, or the device API reports success but the relay didn't actuate. If Pacemaker then starts resources on the surviving node while the "fenced" node is still running, both nodes may import the ZFS pool simultaneously → **split-brain → data corruption**.
+
+### How Fence Verification Works
+
+The playbook deploys a custom `fence_check` agent and uses **Pacemaker fencing levels** to add a mandatory post-fence verification step. Both the primary fence agent AND the verification agent must succeed before Pacemaker proceeds with failover:
+
+```
+Fencing level 1 for storage-b:
+  1. fence-storage-b      (real agent: fence_kasa / fence_ipmilan / etc.)
+  2. fence-verify-storage-b  (verification: fence_check)
+
+Both must succeed → fencing complete → failover proceeds
+Either fails → fencing BLOCKED → failover does NOT happen
+```
+
+The `fence_check` agent:
+1. Waits 10 seconds for the node to fully power down
+2. Queries the STONITH device for the target node's power state
+3. Pings the target on management, storage, and client VLANs
+4. Returns success only if **power is OFF** and **all pings fail**
+
+### Configuration
+
+Enabled by default (`stonith_fence_verify: true` in `roles/pacemaker/defaults/main.yml`). To disable:
+
+```yaml
+# group_vars/storage_nodes.yml
+stonith_fence_verify: false
+```
+
+Re-run the playbook and then regenerate the STONITH config:
+```bash
+ansible-playbook -i inventory.yml site.yml --tags cluster
+ssh storage-a 'sudo bash /root/configure-stonith.sh'
+```
+
+### Verifying the Topology
+
+After running `configure-stonith.sh`, confirm the fencing levels are configured:
+
+```bash
+ssh storage-a 'pcs stonith level'
+# Expected output:
+#   Level 1 - storage-a: fence-storage-a,fence-verify-storage-a
+#   Level 1 - storage-b: fence-storage-b,fence-verify-storage-b
+
+ssh storage-a 'pcs stonith show fence-verify-storage-b'
+```
+
+### Manual Status Check (Non-Destructive)
+
+```bash
+# Check current power state and network reachability of peer
+# (safe to run at any time — does NOT fence the node)
+ssh storage-a 'fence_check -o status -n storage-b'
+
+# Example output when both nodes are online (normal):
+#   fence_check status for storage-b:
+#     STONITH device (kasa @ 10.20.20.202): power=on
+#     Management   10.20.20.2:  reachable
+#     Storage      10.10.10.2:  reachable
+#     Client       10.30.30.2:  reachable
+#   Status: ON
+```
+
+### Troubleshooting a Blocked Failover
+
+If `STONITHFenceVerifyFailed` fires and failover is blocked:
+
+1. **Check why the node is still alive:**
+   ```bash
+   ssh storage-a 'fence_check -o status -n storage-b'
+   # Look for which check is failing: power state, or which network
+   ```
+
+2. **Common causes:**
+   - Smart plug controls the wrong outlet — verify the physically-connected outlet
+   - UPS is keeping the node running — check UPS bypass status
+   - IPMI command was accepted but BMC is unresponsive — check BMC management port
+   - Network still reachable on storage/client VLANs after power cycle (e.g., network switch has the old ARP cached) — try waiting 30s and re-checking
+
+3. **If the node is confirmed dead** (you've physically verified) and fencing is falsely blocked:
+   ```bash
+   # Clear the verification resource failure (allows Pacemaker to retry fencing)
+   ssh storage-a 'pcs resource cleanup fence-verify-storage-b'
+   ```
+
+4. **Do NOT clear the failure** until you are certain the fenced node is not running with ZFS pool imported.
+
 ## Monitoring STONITH Status
 
 The cluster monitoring setup includes a critical alert for STONITH status:

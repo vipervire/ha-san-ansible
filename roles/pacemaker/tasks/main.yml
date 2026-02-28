@@ -172,6 +172,16 @@
     dest: /etc/logrotate.d/corosync
     mode: "0644"
 
+# ─── Post-fence verification agent ─────────────────────────────────────────
+- name: Deploy fence_check post-fence verification agent
+  ansible.builtin.template:
+    src: fence_check.j2
+    dest: /usr/sbin/fence_check
+    mode: "0755"
+  when:
+    - stonith_fence_verify | default(true)
+    - inventory_hostname in groups['storage_nodes']
+
 # ─── STONITH setup (delegated to preferred node) ─────────────────────────
 - name: Generate STONITH configuration script
   ansible.builtin.template:

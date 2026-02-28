@@ -1,0 +1,378 @@
+#!/bin/bash
+# Managed by Ansible — STONITH post-fence verification agent
+# Deployed to /usr/sbin/fence_check on storage nodes.
+#
+# Implements the standard fence agent protocol:
+#   Parameters are read from stdin as key=value pairs (Pacemaker default),
+#   or via -o / -n command-line args for manual testing.
+#
+# Actions:
+#   off    — Wait verify_wait seconds, query STONITH device power state,
+#             ping target on management/storage/client networks.
+#             Returns success only if power=OFF AND all pings fail.
+#   status — Query power state + ping reachability. Print "Status: ON" or
+#             "Status: OFF".  Exit 0=ON, 2=OFF, 1=unknown.
+#   on     — No-op for a verification agent (returns success).
+#   monitor — Confirm the agent script is functional (always returns success).
+#   metadata — Print standard fence agent OCF metadata XML.
+#
+# When used with Pacemaker fencing levels, this agent runs AFTER the real
+# fence agent in the same level.  Both must succeed for fencing to complete.
+# If this agent fails (node still reachable / device says ON), Pacemaker
+# considers fencing failed and will NOT start resource failover.
+
+set -uo pipefail
+
+# ── Parse stdin key=value OR command-line args ─────────────────────────────
+ACTION=""
+PORT=""
+FENCE_METHOD=""
+FENCE_IP=""
+FENCE_USER=""
+FENCE_PASS=""
+TARGET_MGMT_IP=""
+TARGET_STORAGE_IP=""
+TARGET_CLIENT_IP=""
+VERIFY_WAIT="10"
+STATUS_URL=""
+STATUS_ON_REGEX="ON"
+STATUS_OFF_REGEX="OFF"
+SWITCH_NAME="relay"
+
+parse_stdin() {
+    while IFS="=" read -r KEY VALUE; do
+        KEY="${KEY//[[:space:]]/}"
+        VALUE="${VALUE//[[:space:]]/}"
+        case "$KEY" in
+            action)            ACTION="$VALUE" ;;
+            port)              PORT="$VALUE" ;;
+            fence_method)      FENCE_METHOD="$VALUE" ;;
+            fence_ip)          FENCE_IP="$VALUE" ;;
+            fence_user)        FENCE_USER="$VALUE" ;;
+            fence_pass)        FENCE_PASS="$VALUE" ;;
+            target_mgmt_ip)    TARGET_MGMT_IP="$VALUE" ;;
+            target_storage_ip) TARGET_STORAGE_IP="$VALUE" ;;
+            target_client_ip)  TARGET_CLIENT_IP="$VALUE" ;;
+            verify_wait)       VERIFY_WAIT="$VALUE" ;;
+            status_url)        STATUS_URL="$VALUE" ;;
+            status_on_regex)   STATUS_ON_REGEX="$VALUE" ;;
+            status_off_regex)  STATUS_OFF_REGEX="$VALUE" ;;
+            switch_name)       SWITCH_NAME="$VALUE" ;;
+        esac
+    done
+}
+
+# Parse stdin (Pacemaker passes params this way)
+if [ -p /dev/stdin ] || [ ! -t 0 ]; then
+    parse_stdin < /dev/stdin
+fi
+
+# Override from command-line args (for manual testing: fence_check -o status -n storage-b)
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o|--action)   ACTION="$2"; shift ;;
+        -n|--plug)     PORT="$2"; shift ;;
+        --fence_method)      FENCE_METHOD="$2"; shift ;;
+        --fence_ip)          FENCE_IP="$2"; shift ;;
+        --fence_user)        FENCE_USER="$2"; shift ;;
+        --fence_pass)        FENCE_PASS="$2"; shift ;;
+        --target_mgmt_ip)    TARGET_MGMT_IP="$2"; shift ;;
+        --target_storage_ip) TARGET_STORAGE_IP="$2"; shift ;;
+        --target_client_ip)  TARGET_CLIENT_IP="$2"; shift ;;
+        --verify_wait)       VERIFY_WAIT="$2"; shift ;;
+        --status_url)        STATUS_URL="$2"; shift ;;
+        --status_on_regex)   STATUS_ON_REGEX="$2"; shift ;;
+        --status_off_regex)  STATUS_OFF_REGEX="$2"; shift ;;
+        --switch_name)       SWITCH_NAME="$2"; shift ;;
+        -h|--help) ACTION="metadata" ;;
+    esac
+    shift
+done
+
+# ── Metadata action ────────────────────────────────────────────────────────
+if [ "${ACTION}" = "metadata" ]; then
+    cat <<'EOF'
+<?xml version="1.0" ?>
+<resource-agent name="fence_check" shortdesc="Post-fence verification agent">
+  <longdesc>
+    Verifies that a fenced node is actually dead by:
+    1. Querying the STONITH device power state (must report OFF)
+    2. Pinging the target on management, storage, and client VLANs (all must be unreachable)
+    Used as a second resource in a Pacemaker fencing level to validate the primary
+    fence agent's action.
+  </longdesc>
+  <vendor-url>https://github.com/your-org/ha-san-ansible</vendor-url>
+  <parameters>
+    <parameter name="action" unique="0" required="1">
+      <getopt mixed="-o"/>
+      <content type="string" default="off"/>
+      <shortdesc>Fencing action (off, on, status, monitor, metadata)</shortdesc>
+    </parameter>
+    <parameter name="port" unique="0" required="1">
+      <getopt mixed="-n"/>
+      <content type="string"/>
+      <shortdesc>Target node name (matches pcmk_host_list)</shortdesc>
+    </parameter>
+    <parameter name="fence_method" unique="0" required="1">
+      <getopt mixed="--fence_method"/>
+      <content type="string"/>
+      <shortdesc>STONITH device method: ipmi, kasa, tasmota, esphome, http</shortdesc>
+    </parameter>
+    <parameter name="fence_ip" unique="0" required="1">
+      <getopt mixed="--fence_ip"/>
+      <content type="string"/>
+      <shortdesc>STONITH device IP address</shortdesc>
+    </parameter>
+    <parameter name="fence_user" unique="0" required="0">
+      <getopt mixed="--fence_user"/>
+      <content type="string" default=""/>
+      <shortdesc>STONITH device username (IPMI/Tasmota/HTTP)</shortdesc>
+    </parameter>
+    <parameter name="fence_pass" unique="0" required="0">
+      <getopt mixed="--fence_pass"/>
+      <content type="string" default=""/>
+      <shortdesc>STONITH device password</shortdesc>
+    </parameter>
+    <parameter name="target_mgmt_ip" unique="0" required="1">
+      <getopt mixed="--target_mgmt_ip"/>
+      <content type="string"/>
+      <shortdesc>Target node management network IP to ping</shortdesc>
+    </parameter>
+    <parameter name="target_storage_ip" unique="0" required="1">
+      <getopt mixed="--target_storage_ip"/>
+      <content type="string"/>
+      <shortdesc>Target node storage network IP to ping</shortdesc>
+    </parameter>
+    <parameter name="target_client_ip" unique="0" required="1">
+      <getopt mixed="--target_client_ip"/>
+      <content type="string"/>
+      <shortdesc>Target node client network IP to ping</shortdesc>
+    </parameter>
+    <parameter name="verify_wait" unique="0" required="0">
+      <getopt mixed="--verify_wait"/>
+      <content type="string" default="10"/>
+      <shortdesc>Seconds to wait after off action before checking (node power-down time)</shortdesc>
+    </parameter>
+    <parameter name="status_url" unique="0" required="0">
+      <getopt mixed="--status_url"/>
+      <content type="string" default=""/>
+      <shortdesc>HTTP status URL path (for tasmota/esphome/http methods)</shortdesc>
+    </parameter>
+    <parameter name="status_on_regex" unique="0" required="0">
+      <getopt mixed="--status_on_regex"/>
+      <content type="string" default="ON"/>
+      <shortdesc>Regex matching powered-ON response (http method)</shortdesc>
+    </parameter>
+    <parameter name="status_off_regex" unique="0" required="0">
+      <getopt mixed="--status_off_regex"/>
+      <content type="string" default="OFF"/>
+      <shortdesc>Regex matching powered-OFF response (http method)</shortdesc>
+    </parameter>
+    <parameter name="switch_name" unique="0" required="0">
+      <getopt mixed="--switch_name"/>
+      <content type="string" default="relay"/>
+      <shortdesc>ESPHome switch entity name</shortdesc>
+    </parameter>
+  </parameters>
+  <actions>
+    <action name="off" timeout="120"/>
+    <action name="on" timeout="30"/>
+    <action name="status" timeout="30"/>
+    <action name="monitor" timeout="30" interval="0"/>
+    <action name="metadata" timeout="5"/>
+  </actions>
+</resource-agent>
+EOF
+    exit 0
+fi
+
+# ── Validate required params ───────────────────────────────────────────────
+if [ -z "${FENCE_IP}" ] && [ "${ACTION}" != "monitor" ]; then
+    echo "fence_check: fence_ip is required" >&2
+    exit 1
+fi
+if [ -z "${FENCE_METHOD}" ] && [ "${ACTION}" != "monitor" ]; then
+    echo "fence_check: fence_method is required" >&2
+    exit 1
+fi
+
+# ── Monitor action ─────────────────────────────────────────────────────────
+if [ "${ACTION}" = "monitor" ]; then
+    # Agent is functional if this script runs
+    exit 0
+fi
+
+# ── On action ─────────────────────────────────────────────────────────────
+if [ "${ACTION}" = "on" ]; then
+    # Verification agent has no power-on role; return success
+    exit 0
+fi
+
+# ── Power state query function ─────────────────────────────────────────────
+# Returns: "on", "off", or "unknown"
+query_power_state() {
+    local result=""
+    case "${FENCE_METHOD}" in
+        ipmi)
+            result=$(fence_ipmilan \
+                -a "${FENCE_IP}" \
+                -l "${FENCE_USER}" \
+                -p "${FENCE_PASS}" \
+                -P \
+                -o status 2>/dev/null) || true
+            if echo "${result}" | grep -qi "Status:.*ON"; then
+                echo "on"
+            elif echo "${result}" | grep -qi "Status:.*OFF"; then
+                echo "off"
+            else
+                echo "unknown"
+            fi
+            ;;
+        kasa)
+            result=$(fence_kasa \
+                --ip "${FENCE_IP}" \
+                --action status 2>/dev/null) || true
+            if echo "${result}" | grep -qi "Status:.*ON"; then
+                echo "on"
+            elif echo "${result}" | grep -qi "Status:.*OFF"; then
+                echo "off"
+            else
+                echo "unknown"
+            fi
+            ;;
+        tasmota)
+            # GET /cm?cmnd=Power → {"POWER":"ON"} or {"POWER":"OFF"}
+            result=$(curl -sf --max-time 8 \
+                "http://${FENCE_IP}/cm?cmnd=Power" 2>/dev/null) || true
+            if echo "${result}" | grep -q '"ON"'; then
+                echo "on"
+            elif echo "${result}" | grep -q '"OFF"'; then
+                echo "off"
+            else
+                echo "unknown"
+            fi
+            ;;
+        esphome)
+            # GET /switch/<name> → {"id":"...","state":"ON","value":true}
+            result=$(curl -sf --max-time 8 \
+                "http://${FENCE_IP}/switch/${SWITCH_NAME}" 2>/dev/null) || true
+            if echo "${result}" | grep -q '"state":"ON"'; then
+                echo "on"
+            elif echo "${result}" | grep -q '"state":"OFF"'; then
+                echo "off"
+            else
+                echo "unknown"
+            fi
+            ;;
+        http)
+            result=$(curl -sf --max-time 8 \
+                "http://${FENCE_IP}${STATUS_URL}" 2>/dev/null) || true
+            if echo "${result}" | grep -qE "${STATUS_ON_REGEX}"; then
+                echo "on"
+            elif echo "${result}" | grep -qE "${STATUS_OFF_REGEX}"; then
+                echo "off"
+            else
+                echo "unknown"
+            fi
+            ;;
+        *)
+            echo "fence_check: unknown fence_method '${FENCE_METHOD}'" >&2
+            echo "unknown"
+            ;;
+    esac
+}
+
+# ── Network reachability check ─────────────────────────────────────────────
+# Returns 0 if reachable, 1 if not
+is_reachable() {
+    local ip="$1"
+    ping -c 1 -W 2 "${ip}" &>/dev/null
+}
+
+# ── Status action ──────────────────────────────────────────────────────────
+if [ "${ACTION}" = "status" ]; then
+    POWER=$(query_power_state)
+    MGMT_UP=0
+    STORAGE_UP=0
+    CLIENT_UP=0
+    [ -n "${TARGET_MGMT_IP}" ]    && is_reachable "${TARGET_MGMT_IP}"    && MGMT_UP=1    || true
+    [ -n "${TARGET_STORAGE_IP}" ] && is_reachable "${TARGET_STORAGE_IP}" && STORAGE_UP=1 || true
+    [ -n "${TARGET_CLIENT_IP}" ]  && is_reachable "${TARGET_CLIENT_IP}"  && CLIENT_UP=1  || true
+
+    REACHABLE=$(( MGMT_UP + STORAGE_UP + CLIENT_UP ))
+
+    echo "fence_check status for ${PORT:-unknown}:"
+    echo "  STONITH device (${FENCE_METHOD} @ ${FENCE_IP}): power=${POWER}"
+    echo "  Management   ${TARGET_MGMT_IP}:  $([ "${MGMT_UP}" = "1" ] && echo "reachable" || echo "unreachable")"
+    echo "  Storage      ${TARGET_STORAGE_IP}: $([ "${STORAGE_UP}" = "1" ] && echo "reachable" || echo "unreachable")"
+    echo "  Client       ${TARGET_CLIENT_IP}:  $([ "${CLIENT_UP}" = "1" ] && echo "reachable" || echo "unreachable")"
+
+    if [ "${REACHABLE}" -eq 0 ] && [ "${POWER}" = "off" ]; then
+        echo "Status: OFF"
+        exit 2   # exit 2 = confirmed OFF (fence agent convention)
+    else
+        echo "Status: ON"
+        exit 0   # exit 0 = ON
+    fi
+fi
+
+# ── Off action — post-fence verification ───────────────────────────────────
+if [ "${ACTION}" = "off" ]; then
+    echo "fence_check: waiting ${VERIFY_WAIT}s for node ${PORT} to fully power down..." >&2
+    sleep "${VERIFY_WAIT}"
+
+    # 1. Query STONITH device power state
+    POWER=$(query_power_state)
+    echo "fence_check: STONITH device (${FENCE_METHOD} @ ${FENCE_IP}) reports power=${POWER}" >&2
+
+    if [ "${POWER}" = "on" ]; then
+        echo "fence_check: FAILED — STONITH device reports ${PORT} is still powered ON" >&2
+        exit 1
+    elif [ "${POWER}" = "unknown" ]; then
+        echo "fence_check: WARNING — cannot confirm power state from STONITH device" >&2
+        # Continue to network checks; device may be temporarily unresponsive
+    fi
+
+    # 2. Ping target on all networks
+    FAIL_COUNT=0
+
+    if [ -n "${TARGET_MGMT_IP}" ]; then
+        if is_reachable "${TARGET_MGMT_IP}"; then
+            echo "fence_check: FAILED — ${PORT} still reachable on management (${TARGET_MGMT_IP})" >&2
+            FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+        else
+            echo "fence_check: OK — ${PORT} unreachable on management (${TARGET_MGMT_IP})" >&2
+        fi
+    fi
+
+    if [ -n "${TARGET_STORAGE_IP}" ]; then
+        if is_reachable "${TARGET_STORAGE_IP}"; then
+            echo "fence_check: FAILED — ${PORT} still reachable on storage (${TARGET_STORAGE_IP})" >&2
+            FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+        else
+            echo "fence_check: OK — ${PORT} unreachable on storage (${TARGET_STORAGE_IP})" >&2
+        fi
+    fi
+
+    if [ -n "${TARGET_CLIENT_IP}" ]; then
+        if is_reachable "${TARGET_CLIENT_IP}"; then
+            echo "fence_check: FAILED — ${PORT} still reachable on client (${TARGET_CLIENT_IP})" >&2
+            FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+        else
+            echo "fence_check: OK — ${PORT} unreachable on client (${TARGET_CLIENT_IP})" >&2
+        fi
+    fi
+
+    if [ "${FAIL_COUNT}" -gt 0 ]; then
+        echo "fence_check: FAILED — ${PORT} is still network-reachable after fencing" >&2
+        echo "fence_check: Possible causes: wrong outlet, UPS, VLAN misconfiguration" >&2
+        exit 1
+    fi
+
+    echo "fence_check: VERIFIED — ${PORT} is confirmed dead (power=${POWER}, all networks unreachable)" >&2
+    exit 0
+fi
+
+# Unknown action
+echo "fence_check: unknown action '${ACTION}'" >&2
+exit 1

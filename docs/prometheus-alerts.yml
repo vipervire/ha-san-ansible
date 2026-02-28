@@ -422,6 +422,27 @@ groups:
             Check config: pcs stonith show {{ $labels.resource }}
           runbook: "See docs/alert-runbooks.md#stonithresourcefailed"
 
+      - alert: STONITHFenceVerifyFailed
+        expr: ha_cluster_pacemaker_resources{resource=~"fence-verify-.*",status="failed"} == 1
+        for: 1m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "Post-fence verification failed for {{ $labels.resource }}"
+          description: |
+            The fence verification agent {{ $labels.resource }} failed.
+            This means the STONITH device reported power ON, or the target node is
+            still reachable on the network after fencing was attempted.
+            Pacemaker has BLOCKED failover to prevent split-brain / data corruption.
+            Manual investigation required:
+              - Check device outlet assignment (wrong outlet?)
+              - Check if a UPS is keeping the node alive
+              - Query device: fence_check -o status -n <node>
+              - Check pacemaker logs: journalctl -u pacemaker -f
+            DO NOT manually clear this failure until the node is confirmed dead.
+          runbook: "See docs/stonith-smart-plugs.md#post-fence-verification"
+
   # =========================================================================
   # Service Health Alerts
   # =========================================================================

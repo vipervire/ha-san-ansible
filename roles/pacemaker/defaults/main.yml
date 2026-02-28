@@ -4,3 +4,9 @@
 pacemaker_preferred_node: "storage-a"   # soft preference (not a hard pin)
 pacemaker_resource_stickiness: 200       # prefer staying on current node
 pacemaker_standby_drain_seconds: 15      # wait for resource migration before stopping
+
+# Post-fence verification — adds a second fencing level that queries the STONITH
+# device power state and pings the target on all VLANs after the primary fence agent
+# runs.  If verification fails (node still alive), Pacemaker blocks failover to
+# prevent split-brain.  Defaults to true because this is a safety feature.
+stonith_fence_verify: true
