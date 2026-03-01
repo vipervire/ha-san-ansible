@@ -77,10 +77,12 @@ spare = nvme.get('available_spare', 0)
 used = nvme.get('percentage_used', 0)
 poh = nvme.get('power_on_hours', 0)
 labels = '${LABELS}'
+{% raw %}
 print(f'node_disk_smart_temperature_celsius{{{labels}}} {temp}')
 print(f'node_disk_nvme_available_spare_percent{{{labels}}} {spare}')
 print(f'node_disk_nvme_percentage_used{{{labels}}} {used}')
 print(f'node_disk_smart_power_on_hours_total{{{labels}}} {poh}')
+{% endraw %}
 " 2>/dev/null || true
     else
       # SATA/SAS attributes — parse ata_smart_attributes array
@@ -97,10 +99,12 @@ poh = attrs.get('Power_On_Hours', 0)
 if temp is not None:
     temp = temp & 0xFF
 labels = '${LABELS}'
+{% raw %}
 if temp is not None:
     print(f'node_disk_smart_temperature_celsius{{{labels}}} {temp}')
 print(f'node_disk_smart_reallocated_sectors_total{{{labels}}} {realloc}')
 print(f'node_disk_smart_power_on_hours_total{{{labels}}} {poh}')
+{% endraw %}
 " 2>/dev/null || true
     fi
   done

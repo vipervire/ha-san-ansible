@@ -115,7 +115,9 @@ echo "=== Creating ZFS pool: $POOL ==="
 MIRROR_ARGS=""
 for i in "${!LOCAL_DISKS[@]}"; do
   MIRROR_ARGS+="  mirror ${LOCAL_DISKS[$i]} ${REMOTE_DISKS[$i]}"
+{% raw %}
   if [[ $i -lt $((${#LOCAL_DISKS[@]} - 1)) ]]; then
+{% endraw %}
     MIRROR_ARGS+=" \\"$'\n'
   fi
 done
