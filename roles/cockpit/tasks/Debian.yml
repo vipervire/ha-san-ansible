@@ -1,0 +1,37 @@
+---
+# roles/cockpit/tasks/Debian.yml — Debian-specific Cockpit + 45Drives installation
+
+- name: Install Cockpit
+  ansible.builtin.apt:
+    name: "{{ _cockpit_packages }}"
+    state: present
+
+# ─── 45Drives Houston plugins ─────────────────────────────────────────────
+- name: Add 45Drives GPG signing key
+  ansible.builtin.get_url:
+    url: https://repo.45drives.com/key/gpg
+    dest: "{{ _45drives_keyring_path }}"
+    mode: "0644"
+    checksum: "{{ fortyfive_drives_gpg_checksum | default(omit) }}"
+  register: key_download
+
+- name: Add 45Drives apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ _45drives_repo_url }}"
+    state: present
+    filename: 45drives
+  when: key_download is succeeded
+
+- name: Update apt cache after adding 45Drives repo
+  ansible.builtin.apt:
+    update_cache: true
+  when: key_download.changed
+
+- name: Install 45Drives Houston Cockpit plugins
+  ansible.builtin.apt:
+    name:
+      - cockpit-file-sharing
+      - cockpit-identities
+      - cockpit-navigator
+    state: present
+  ignore_errors: true  # repo may not have packages for your arch/release

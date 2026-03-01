@@ -8,9 +8,10 @@
 # WARNING: Enabling networking_manage on a running system may disrupt connectivity.
 #          Set networking_restart_on_change: true only during initial deployment.
 
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
+
 # ─── TCP performance tuning (storage nodes) ───────────────────────────────
-# Lives here (not in hardening) because this is performance configuration,
-# not security hardening. Runs whenever tcp_tunables is defined.
 - name: Deploy TCP tuning sysctl settings
   ansible.builtin.template:
     src: 91-tcp-tuning.conf.j2
@@ -29,11 +30,8 @@
     tcp_tunables.get('net.ipv4.tcp_congestion_control', '') == 'bbr'
 
 # ─── Interface configuration (opt-in) ─────────────────────────────────────
-- name: Install systemd-networkd
-  ansible.builtin.apt:
-    name: systemd-networkd
-    state: present
-  when: networking_manage | default(false)
+- name: Include OS-specific network package installation
+  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
 
 - name: Deploy management interface config
   ansible.builtin.template:

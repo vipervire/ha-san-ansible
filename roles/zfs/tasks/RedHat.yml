@@ -1,0 +1,25 @@
+---
+# roles/zfs/tasks/RedHat.yml — Rocky Linux-specific ZFS installation
+
+- name: Install EPEL repository
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+
+- name: Install ZFS release package from OpenZFS
+  ansible.builtin.dnf:
+    name: "https://zfsonlinux.org/epel/zfs-release-2-3{{ '.el' + ansible_distribution_major_version + '.noarch.rpm' }}"
+    state: present
+    disable_gpg_check: true
+  register: zfs_repo_install
+  failed_when: zfs_repo_install.rc != 0 and 'already installed' not in (zfs_repo_install.msg | default(''))
+
+- name: Install ZFS prerequisites
+  ansible.builtin.dnf:
+    name: "{{ _zfs_prereq_packages }}"
+    state: present
+
+- name: Install ZFS packages
+  ansible.builtin.dnf:
+    name: "{{ _zfs_packages }}"
+    state: present

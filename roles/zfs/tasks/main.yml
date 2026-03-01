@@ -1,28 +1,15 @@
 ---
 # roles/zfs/tasks/main.yml — ZFS installation and configuration
+# Dispatches to OS-specific task files for package installation,
+# then runs shared ZFS configuration tasks.
 
-- name: Install ZFS prerequisites
-  ansible.builtin.apt:
-    name:
-      - linux-headers-{{ ansible_kernel }}
-      - dkms
-      - dpkg-dev
-    state: present
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
-- name: Add Debian contrib and non-free repos for ZFS
-  ansible.builtin.apt_repository:
-    repo: "deb http://deb.debian.org/debian {{ ansible_distribution_release }} main contrib non-free"
-    state: present
-    filename: debian-contrib
+- name: Include OS-specific ZFS installation tasks
+  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
 
-- name: Install ZFS packages
-  ansible.builtin.apt:
-    name:
-      - zfsutils-linux
-      - zfs-dkms
-      - zfs-zed
-    state: present
-    update_cache: true
+# ─── Shared ZFS configuration (OS-independent) ──────────────────────────────
 
 # Compute ARC max dynamically: 50% of total RAM, unless overridden per-host via zfs_arc_max
 - name: Set ZFS ARC max (dynamic unless overridden in host_vars)
@@ -55,21 +42,8 @@
 - name: Install sanoid for automated snapshots
   when: sanoid_install | default(false)
   block:
-    - name: Install sanoid dependencies
-      ansible.builtin.apt:
-        name:
-          - debhelper
-          - libcapture-tiny-perl
-          - libconfig-inifiles-perl
-          - pv
-          - lzop
-          - mbuffer
-        state: present
-
-    - name: Install sanoid from Debian repos
-      ansible.builtin.apt:
-        name: sanoid
-        state: present
+    - name: Include OS-specific sanoid installation
+      ansible.builtin.include_tasks: "install_sanoid_{{ ansible_os_family }}.yml"
 
     - name: Deploy sanoid configuration
       ansible.builtin.template:
@@ -84,9 +58,6 @@
         state: started
 
 # ─── ZFS Dataset Creation ──────────────────────────────────────────────────
-# Only runs when the pool is imported. Datasets are idempotent (state: present).
-# Properties listed in zfs_datasets are applied on every run, so this also
-# enforces dataset configuration drift correction.
 - name: Check if ZFS pool is imported
   ansible.builtin.command:
     cmd: zpool list {{ zfs_pool_name }}
@@ -137,8 +108,6 @@
   when: zfs_scrub_enabled | default(true)
 
 # ─── ZED → ntfy event notifications ────────────────────────────────────────
-# Provides immediate push alerts for pool events (complements Prometheus polling).
-# Events covered: vdev_degrade, resilver_start/finish, pool_import/export.
 - name: Ensure ZED event handler directory exists
   ansible.builtin.file:
     path: /etc/zfs/zed.d

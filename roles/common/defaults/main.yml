@@ -2,12 +2,12 @@
 # roles/common/defaults/main.yml — Common role defaults
 # Override these in group_vars/all.yml or host_vars/
 
-ntp_servers:
-  - "0.debian.pool.ntp.org"
-  - "1.debian.pool.ntp.org"
+# NTP servers — set in group_vars/all.yml to override.
+# If left empty, OS-specific defaults are used (debian.pool.ntp.org / pool.ntp.org).
+ntp_servers: []
 
 admin_user: storageadmin
 admin_ssh_pubkey: ""             # Set in group_vars/all.yml — required
 
-# Skip unattended-upgrades installation
+# Skip automatic security updates (unattended-upgrades on Debian, dnf-automatic on Rocky)
 common_skip_unattended_upgrades: false

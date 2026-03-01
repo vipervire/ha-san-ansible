@@ -1,0 +1,8 @@
+---
+# roles/networking/tasks/Debian.yml — Debian-specific network package installation
+
+- name: Install systemd-networkd
+  ansible.builtin.apt:
+    name: "{{ _networkd_package }}"
+    state: present
+  when: networking_manage | default(false)

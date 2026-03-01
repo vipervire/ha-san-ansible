@@ -1,0 +1,8 @@
+---
+# OS-specific variables for RHEL/Rocky Linux — iSCSI initiator role
+
+_iscsi_initiator_packages:
+  - iscsi-initiator-utils
+
+_iscsi_initiator_services:
+  - iscsid

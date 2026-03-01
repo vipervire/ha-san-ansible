@@ -1,0 +1,10 @@
+---
+# OS-specific variables for Debian — hardening role
+
+_hardening_packages:
+  nftables: nftables
+  auditd: auditd
+  rsyslog: rsyslog
+  watchdog: watchdog
+
+_pam_faillock_command: "pam-auth-update --enable faillock"

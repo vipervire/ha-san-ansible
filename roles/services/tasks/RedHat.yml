@@ -1,0 +1,18 @@
+---
+# roles/services/tasks/RedHat.yml — Rocky Linux-specific service package installation
+
+- name: Install NFS server
+  ansible.builtin.dnf:
+    name: "{{ _nfs_packages }}"
+    state: present
+
+- name: Install Samba
+  ansible.builtin.dnf:
+    name: "{{ _samba_packages }}"
+    state: present
+
+- name: Install targetcli for client-facing iSCSI target
+  ansible.builtin.dnf:
+    name: "{{ _iscsi_client_target_packages }}"
+    state: present
+  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0

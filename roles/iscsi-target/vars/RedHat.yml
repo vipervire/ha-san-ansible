@@ -1,0 +1,8 @@
+---
+# OS-specific variables for RHEL/Rocky Linux — iSCSI target role
+
+_iscsi_target_packages:
+  - targetcli
+  - python3-rtslib
+
+_iscsi_target_service: target

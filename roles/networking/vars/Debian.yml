@@ -1,0 +1,4 @@
+---
+# OS-specific variables for Debian — networking role
+
+_networkd_package: systemd-networkd

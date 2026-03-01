@@ -1,0 +1,11 @@
+---
+# OS-specific variables for RHEL/Rocky Linux — cockpit role
+
+_cockpit_packages:
+  - cockpit
+  - cockpit-storaged
+  - cockpit-networkmanager
+  - cockpit-packagekit
+
+_45drives_repo_url: "https://repo.45drives.com/rockylinux/el{{ ansible_distribution_major_version }}"
+_45drives_keyring_path: /etc/pki/rpm-gpg/RPM-GPG-KEY-45drives

@@ -1,0 +1,25 @@
+---
+# roles/monitoring/tasks/Debian.yml — Debian-specific monitoring package installation
+
+- name: Install prometheus-node-exporter
+  ansible.builtin.apt:
+    name: "{{ _node_exporter_package }}"
+    state: present
+
+- name: Install rasdaemon
+  ansible.builtin.apt:
+    name: "{{ _rasdaemon_package }}"
+    state: present
+  when: ras_monitoring_enabled | default(false)
+
+- name: Install smartmontools
+  ansible.builtin.apt:
+    name: "{{ _smartmontools_package }}"
+    state: present
+  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
+
+- name: Install prometheus-hacluster-exporter
+  ansible.builtin.apt:
+    name: "{{ _ha_cluster_exporter_package }}"
+    state: present
+  when: ha_cluster_monitoring_enabled | default(true)

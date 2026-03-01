@@ -1,0 +1,25 @@
+---
+# roles/monitoring/tasks/RedHat.yml — Rocky Linux-specific monitoring package installation
+
+- name: Install prometheus-node-exporter
+  ansible.builtin.dnf:
+    name: "{{ _node_exporter_package }}"
+    state: present
+
+- name: Install rasdaemon
+  ansible.builtin.dnf:
+    name: "{{ _rasdaemon_package }}"
+    state: present
+  when: ras_monitoring_enabled | default(false)
+
+- name: Install smartmontools
+  ansible.builtin.dnf:
+    name: "{{ _smartmontools_package }}"
+    state: present
+  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
+
+- name: Install prometheus-hacluster-exporter
+  ansible.builtin.dnf:
+    name: "{{ _ha_cluster_exporter_package }}"
+    state: present
+  when: ha_cluster_monitoring_enabled | default(true)

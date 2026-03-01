@@ -1,0 +1,18 @@
+---
+# roles/services/tasks/Debian.yml — Debian-specific service package installation
+
+- name: Install NFS server
+  ansible.builtin.apt:
+    name: "{{ _nfs_packages }}"
+    state: present
+
+- name: Install Samba
+  ansible.builtin.apt:
+    name: "{{ _samba_packages }}"
+    state: present
+
+- name: Install targetcli for client-facing iSCSI target
+  ansible.builtin.apt:
+    name: "{{ _iscsi_client_target_packages }}"
+    state: present
+  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0

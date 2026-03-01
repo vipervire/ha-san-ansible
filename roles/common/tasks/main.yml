@@ -1,55 +1,20 @@
 ---
 # roles/common/tasks/main.yml — Base OS setup for all nodes
+# Dispatches to OS-specific task files for package management, then
+# runs shared tasks that work identically on both Debian and Rocky.
 
-- name: Update apt cache
-  ansible.builtin.apt:
-    update_cache: true
-    cache_valid_time: 3600
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
-- name: Install base packages
-  ansible.builtin.apt:
-    name:
-      - apt-transport-https
-      - ca-certificates
-      - curl
-      - gnupg
-      - lsb-release
-      - sudo
-      - vim
-      - tmux
-      - htop
-      - iotop
-      - net-tools
-      - dnsutils
-      - rsync
-      - chrony
-      - python3
-      - python3-apt
-      - unattended-upgrades
-      - apt-listchanges
-    state: present
+- name: Include OS-specific package tasks
+  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
 
-- name: Remove unnecessary packages
-  ansible.builtin.apt:
-    name:
-      - avahi-daemon
-      - cups-daemon
-      - exim4-base
-      - exim4-daemon-light
-      - bluetooth
-      - modemmanager
-    state: absent
-    purge: true
-  failed_when: false  # some may not be installed
-
-- name: Autoremove orphaned packages
-  ansible.builtin.apt:
-    autoremove: true
+# ─── Shared tasks (OS-independent) ──────────────────────────────────────────
 
 - name: Configure chrony NTP
   ansible.builtin.template:
     src: chrony.conf.j2
-    dest: /etc/chrony/chrony.conf
+    dest: "{{ _chrony_config_path }}"
     mode: "0644"
   notify: restart chrony
 
@@ -69,11 +34,3 @@
   ansible.builtin.systemd:
     name: ctrl-alt-del.target
     masked: true
-
-- name: Configure unattended-upgrades (security only, no auto-reboot)
-  ansible.builtin.copy:
-    dest: /etc/apt/apt.conf.d/51unattended-upgrades-custom
-    mode: "0644"
-    content: |
-      Unattended-Upgrade::Automatic-Reboot "false";
-      Unattended-Upgrade::Remove-Unused-Dependencies "true";

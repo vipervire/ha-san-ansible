@@ -1,0 +1,18 @@
+---
+# OS-specific variables for RHEL/Rocky Linux — ZFS role
+
+_zfs_prereq_packages:
+  - "kernel-devel-{{ ansible_kernel }}"
+  - dkms
+
+_zfs_packages:
+  - zfs
+  - zfs-dkms
+
+_sanoid_packages:
+  - pv
+  - lzop
+  - mbuffer
+  - perl-Config-IniFiles
+  - perl-Capture-Tiny
+  - sanoid

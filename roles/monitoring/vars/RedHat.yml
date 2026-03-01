@@ -1,0 +1,15 @@
+---
+# OS-specific variables for RHEL/Rocky Linux — monitoring role
+
+_node_exporter_package: golang-github-prometheus-node-exporter
+_node_exporter_service: node_exporter
+_node_exporter_env_file: /etc/sysconfig/node_exporter
+_node_exporter_user: node_exporter
+_node_exporter_group: node_exporter
+
+_ha_cluster_exporter_package: prometheus-ha-cluster-exporter
+_ha_cluster_exporter_service: prometheus-ha-cluster-exporter
+_ha_cluster_exporter_env_file: /etc/sysconfig/prometheus-ha-cluster-exporter
+
+_rasdaemon_package: rasdaemon
+_smartmontools_package: smartmontools

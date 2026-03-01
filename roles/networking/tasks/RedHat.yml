@@ -1,0 +1,9 @@
+---
+# roles/networking/tasks/RedHat.yml — Rocky Linux-specific network package installation
+# systemd-networkd is included in the systemd package on Rocky Linux.
+
+- name: Ensure systemd is present (provides systemd-networkd)
+  ansible.builtin.dnf:
+    name: "{{ _networkd_package }}"
+    state: present
+  when: networking_manage | default(false)

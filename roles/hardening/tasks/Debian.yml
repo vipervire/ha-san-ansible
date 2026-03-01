@@ -1,0 +1,14 @@
+---
+# roles/hardening/tasks/Debian.yml — Debian-specific package installation
+
+- name: Install nftables
+  ansible.builtin.apt:
+    name: "{{ _hardening_packages.nftables }}"
+    state: present
+
+- name: Disable firewalld if present (Debian uses nftables directly)
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: false
+    state: stopped
+  failed_when: false
