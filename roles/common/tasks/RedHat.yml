@@ -1,0 +1,40 @@
+---
+# roles/common/tasks/RedHat.yml — RHEL/Rocky-specific package management
+
+- name: Install base packages
+  ansible.builtin.dnf:
+    name: "{{ _common_packages }}"
+    state: present
+
+- name: Remove unnecessary packages
+  ansible.builtin.dnf:
+    name: "{{ _common_remove_packages }}"
+    state: absent
+  failed_when: false  # some may not be installed
+
+- name: Autoremove orphaned packages
+  ansible.builtin.dnf:
+    autoremove: true
+
+- name: Install dnf-automatic
+  ansible.builtin.dnf:
+    name: "{{ _common_auto_update_packages }}"
+    state: present
+  when: not (common_skip_unattended_upgrades | default(false))
+
+- name: Configure dnf-automatic for security updates only
+  ansible.builtin.lineinfile:
+    path: /etc/dnf/automatic.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^apply_updates', line: 'apply_updates = yes' }
+    - { regexp: '^upgrade_type', line: 'upgrade_type = security' }
+  when: not (common_skip_unattended_upgrades | default(false))
+
+- name: Enable dnf-automatic timer
+  ansible.builtin.systemd:
+    name: dnf-automatic.timer
+    enabled: true
+    state: started
+  when: not (common_skip_unattended_upgrades | default(false))

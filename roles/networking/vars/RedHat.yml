@@ -1,0 +1,5 @@
+---
+# OS-specific variables for RHEL/Rocky Linux — networking role
+# systemd-networkd is included in the systemd package on RHEL-family
+
+_networkd_package: systemd

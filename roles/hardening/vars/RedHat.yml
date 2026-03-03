@@ -1,0 +1,10 @@
+---
+# OS-specific variables for RHEL/Rocky Linux — hardening role
+
+_hardening_packages:
+  nftables: nftables
+  auditd: audit
+  rsyslog: rsyslog
+  watchdog: watchdog
+
+_pam_faillock_command: "authselect enable-feature with-faillock"

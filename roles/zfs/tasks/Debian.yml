@@ -1,0 +1,19 @@
+---
+# roles/zfs/tasks/Debian.yml — Debian-specific ZFS installation
+
+- name: Install ZFS prerequisites
+  ansible.builtin.apt:
+    name: "{{ _zfs_prereq_packages }}"
+    state: present
+
+- name: Add Debian contrib and non-free repos for ZFS
+  ansible.builtin.apt_repository:
+    repo: "deb http://deb.debian.org/debian {{ ansible_distribution_release }} main contrib non-free"
+    state: present
+    filename: debian-contrib
+
+- name: Install ZFS packages
+  ansible.builtin.apt:
+    name: "{{ _zfs_packages }}"
+    state: present
+    update_cache: true

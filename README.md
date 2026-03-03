@@ -32,7 +32,7 @@ Two-node active/passive storage cluster with quorum, deploying:
 
 ## Prerequisites
 
-1. **Three hosts** running Debian 12 minimal (fresh install)
+1. **Three hosts** running Debian 12 or Rocky Linux 9 minimal (fresh install)
 2. **SSH key access** as `storageadmin` with passwordless sudo
 3. **Network connectivity** on management VLAN between all nodes
 4. **Ansible 2.14+** on your control machine

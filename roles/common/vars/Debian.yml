@@ -1,0 +1,38 @@
+---
+# OS-specific variables for Debian
+
+_common_packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - sudo
+  - vim
+  - tmux
+  - htop
+  - iotop
+  - net-tools
+  - dnsutils
+  - rsync
+  - chrony
+  - python3
+  - python3-apt
+
+_common_auto_update_packages:
+  - unattended-upgrades
+  - apt-listchanges
+
+_common_remove_packages:
+  - avahi-daemon
+  - cups-daemon
+  - exim4-base
+  - exim4-daemon-light
+  - bluetooth
+  - modemmanager
+
+_chrony_config_path: /etc/chrony/chrony.conf
+
+_default_ntp_servers:
+  - "0.debian.pool.ntp.org"
+  - "1.debian.pool.ntp.org"

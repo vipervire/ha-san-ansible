@@ -1,0 +1,9 @@
+---
+# OS-specific variables for Debian — iSCSI initiator role
+
+_iscsi_initiator_packages:
+  - open-iscsi
+
+_iscsi_initiator_services:
+  - iscsid
+  - open-iscsi

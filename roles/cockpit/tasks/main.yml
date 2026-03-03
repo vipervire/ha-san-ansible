@@ -1,66 +1,22 @@
 ---
 # roles/cockpit/tasks/main.yml — Cockpit + 45Drives Houston plugins
 
-- name: Install Cockpit
-  ansible.builtin.apt:
-    name:
-      - cockpit
-      - cockpit-storaged
-      - cockpit-networkmanager
-      - cockpit-packagekit
-    state: present
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
-# Play 5 in site.yml targets storage_nodes only.
-# Pacemaker manages the Cockpit socket there (VIP follows the active node).
-# To enable Cockpit on the quorum node, add a separate play targeting quorum_node.
+- name: Include OS-specific Cockpit installation tasks
+  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
+
+# ─── Shared Cockpit configuration (OS-independent) ──────────────────────────
+
+# Pacemaker manages the Cockpit socket on storage nodes (VIP follows the active node).
 - name: Disable Cockpit auto-start on storage nodes (Pacemaker manages this)
   ansible.builtin.systemd:
     name: cockpit.socket
     enabled: false
     state: stopped
 
-# ─── 45Drives Houston plugins ─────────────────────────────────────────────
-# These are optional — install from 45Drives repo.
-# Uses explicit apt key + repo rather than curl|bash to avoid supply chain risk.
-
-- name: Add 45Drives GPG signing key
-  ansible.builtin.get_url:
-    url: https://repo.45drives.com/key/gpg
-    dest: /usr/share/keyrings/45drives-archive-keyring.gpg
-    mode: "0644"
-    checksum: "{{ fortyfive_drives_gpg_checksum | default(omit) }}"
-    # Set fortyfive_drives_gpg_checksum in group_vars to enforce integrity, e.g.:
-    #   fortyfive_drives_gpg_checksum: "sha256:abc123..."
-    # Obtain with: curl -s https://repo.45drives.com/key/gpg | sha256sum
-  register: key_download
-
-- name: Add 45Drives apt repository
-  ansible.builtin.apt_repository:
-    repo: >-
-      deb [arch=amd64 signed-by=/usr/share/keyrings/45drives-archive-keyring.gpg]
-      https://repo.45drives.com/debian {{ ansible_distribution_release }} main
-    state: present
-    filename: 45drives
-  when: key_download is succeeded
-
-- name: Update apt cache after adding 45Drives repo
-  ansible.builtin.apt:
-    update_cache: true
-  when: key_download.changed
-
-- name: Install 45Drives Houston Cockpit plugins
-  ansible.builtin.apt:
-    name:
-      - cockpit-file-sharing    # NFS + SMB management
-      - cockpit-identities      # User/group management
-      - cockpit-navigator       # File browser
-    state: present
-  ignore_errors: true  # repo may not have packages for your arch/release
-
 # ─── Custom TLS certificate for Cockpit (optional) ────────────────────────
-# By default Cockpit generates a self-signed cert. Set cockpit_tls_cert_file
-# and cockpit_tls_key_file to deploy a custom cert (e.g. from internal CA).
-# For production, consider placing Cockpit behind a reverse proxy instead.
 - name: Create Cockpit TLS cert directory
   ansible.builtin.file:
     path: /etc/cockpit/ws-certs.d

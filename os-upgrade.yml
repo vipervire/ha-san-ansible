@@ -211,10 +211,13 @@
           1. Upgrade the OS on {{ inventory_hostname }}:
 
              ssh {{ inventory_hostname }}
-             sudo apt update && sudo apt full-upgrade -y
-             # For a dist-upgrade (Debian major version bump), also:
-             # sudo sed -i 's/bookworm/trixie/g' /etc/apt/sources.list.d/*.list
-             # sudo apt update && sudo apt full-upgrade -y && sudo apt autoremove -y
+             # Debian:
+             #   sudo apt update && sudo apt full-upgrade -y
+             #   # For a dist-upgrade (Debian major version bump), also:
+             #   # sudo sed -i 's/bookworm/trixie/g' /etc/apt/sources.list.d/*.list
+             #   # sudo apt update && sudo apt full-upgrade -y && sudo apt autoremove -y
+             # Rocky Linux:
+             #   sudo dnf upgrade -y
              sudo reboot
 
           2. Wait for {{ inventory_hostname }} to come back online (~2-3 min).

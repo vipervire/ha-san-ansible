@@ -23,7 +23,7 @@
 #   ansible-playbook -i inventory.yml site.yml --check --diff
 #
 # Prerequisites:
-#   - Fresh Debian 12 minimal install on all three nodes
+#   - Fresh Debian 12 or Rocky Linux 9 minimal install on all three nodes
 #   - SSH key access as storageadmin with sudo
 #   - Network connectivity on management VLAN between all nodes
 #   - Disks identified and listed in host_vars

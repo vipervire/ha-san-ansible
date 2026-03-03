@@ -1,0 +1,19 @@
+---
+# OS-specific variables for RHEL/Rocky Linux — services role
+
+_nfs_packages:
+  - nfs-utils
+
+_nfs_server_service: nfs-server
+
+_samba_packages:
+  - samba
+  - samba-common
+
+_samba_services:
+  - smb
+  - nmb
+
+_iscsi_client_target_packages:
+  - targetcli
+  - python3-rtslib

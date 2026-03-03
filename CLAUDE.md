@@ -4,7 +4,7 @@ This file contains guidelines and reminders for maintaining and extending this A
 
 ## What This Playbook Does
 
-This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI SAN** on Debian 12. The architecture is:
+This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI SAN** on Debian 12 or Rocky Linux 9. The architecture is:
 
 - **storage-a** and **storage-b**: Two symmetric storage nodes. Each exports its local disks via LIO iSCSI target to the peer, and connects to the peer's iSCSI target. A ZFS pool mirrors local physical disks with remote iSCSI disks. Either node can serve as active primary.
 - **quorum**: A lightweight third node that participates in Corosync/Pacemaker quorum voting only (no storage role).
@@ -30,7 +30,12 @@ This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI S
 │   ├── storage-b.yml      # Node-specific: IPs, iSCSI IQNs, local disk paths
 │   └── quorum.yml         # Minimal: mgmt_ip and ssh_listen_addresses only
 ├── roles/
-│   ├── common/            # Base OS: apt packages, NTP (chrony), package cleanup
+│   ├── common/            # Base OS: packages, NTP (chrony), package cleanup
+│   │   ├── tasks/main.yml      # Shared tasks — dispatches to OS-specific files
+│   │   ├── tasks/Debian.yml    # Debian: apt packages, unattended-upgrades
+│   │   ├── tasks/RedHat.yml    # Rocky: dnf packages, dnf-automatic
+│   │   ├── vars/Debian.yml     # Debian package names, paths
+│   │   └── vars/RedHat.yml     # Rocky package names, paths
 │   ├── hardening/         # Security: nftables firewall, SSH hardening, sysctl, PAM faillock
 │   ├── zfs/               # ZFS install, ARC tuning, modprobe options, Sanoid snapshots
 │   ├── iscsi-target/      # LIO iSCSI target setup (backend disk replication)
@@ -39,6 +44,7 @@ This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI S
 │   ├── services/          # NFS, SMB, iSCSI client target; shared config dir on ZFS pool
 │   ├── monitoring/        # node_exporter, ha_cluster_exporter, ZFS scrub exporter, STONITH probe, reboot exporter
 │   └── cockpit/           # Cockpit + 45Drives Houston plugins
+│   # Each role follows the same pattern: tasks/{main,Debian,RedHat}.yml + vars/{Debian,RedHat}.yml
 └── docs/
     ├── cluster-monitoring.md      # ha_cluster_exporter, Prometheus scrape configs, key metrics
     ├── cockpit-ha-config.md       # Cockpit VIP + shared storage config sync (symlinks)
@@ -254,7 +260,50 @@ smart_monitoring_enabled: true        # toggles S.M.A.R.T disk health exporter
 - `services.yml`: NFS exports (`nfs_exports`), SMB shares (`smb_shares`)
 - `cluster.yml`: STONITH configuration (`stonith_nodes` dict), Pacemaker tuning, monitoring toggles
 
-### 6. ZFS Tunables
+### 6. Multi-OS Support (Debian 12 / Rocky Linux 9)
+
+The playbook supports both **Debian 12** and **Rocky Linux 9** on all nodes. Each role uses OS-specific task files and variable files, dispatched via `ansible_os_family`:
+
+**Role structure pattern:**
+```
+roles/<role>/
+├── tasks/
+│   ├── main.yml        # Loads OS vars, dispatches to OS-specific tasks, then shared tasks
+│   ├── Debian.yml      # Debian-specific: apt packages, repos, service names
+│   └── RedHat.yml      # Rocky-specific: dnf packages, repos, service names
+├── vars/
+│   ├── Debian.yml      # Debian package names, paths, service names
+│   └── RedHat.yml      # Rocky package names, paths, service names
+```
+
+**Key differences between Debian and Rocky:**
+
+| Area | Debian 12 | Rocky Linux 9 |
+|------|-----------|---------------|
+| Package manager | `apt` | `dnf` |
+| Auto-updates | `unattended-upgrades` | `dnf-automatic` |
+| PAM faillock | `pam-auth-update --enable faillock` | `authselect enable-feature with-faillock` |
+| ZFS source | `deb.debian.org` contrib | OpenZFS ELRepo RPM |
+| ZFS prerequisites | `linux-headers-*`, `dkms`, `dpkg-dev` | `kernel-devel-*`, `dkms` |
+| ZFS packages | `zfsutils-linux`, `zfs-dkms`, `zfs-zed` | `zfs`, `zfs-dkms` |
+| NFS server | `nfs-kernel-server` | `nfs-utils` |
+| NFS service name | `nfs-kernel-server` | `nfs-server` |
+| Samba services | `smbd`, `nmbd` | `smb`, `nmb` |
+| iSCSI target | `targetcli-fb`, `python3-rtslib-fb` | `targetcli`, `python3-rtslib` |
+| iSCSI target svc | `rtslib-fb-targetctl` | `target` |
+| iSCSI initiator | `open-iscsi` | `iscsi-initiator-utils` |
+| Chrony config | `/etc/chrony/chrony.conf` | `/etc/chrony.conf` |
+| Service env files | `/etc/default/<service>` | `/etc/sysconfig/<service>` |
+| Reboot check | `/var/run/reboot-required` | `needs-restarting -r` |
+| Firewall | nftables (native) | nftables (firewalld disabled) |
+
+**When adding new tasks:**
+- Use `ansible.builtin.package` for simple installs that share the same package name
+- Use OS-specific task files when package names differ or repos need adding
+- Always check both `vars/Debian.yml` and `vars/RedHat.yml` when adding packages
+- Templates that reference OS-specific paths should use variables from the vars files
+
+### 7. ZFS Tunables
 
 ZFS module parameters are written to `/etc/modprobe.d/zfs.conf` via template (`roles/zfs/templates/zfs-modprobe.conf.j2`). The `zfs_arc_max` is computed dynamically (50% of total RAM) and injected separately as a fact.
 
@@ -276,7 +325,7 @@ zfs_modprobe_options:
 zfs_arc_max: 17179869184  # 16GB — explicit per-host override
 ```
 
-### 7. Sanoid Snapshot Policy
+### 8. Sanoid Snapshot Policy
 
 Sanoid is optionally installed and configured for automated ZFS snapshots:
 ```yaml
@@ -290,7 +339,7 @@ sanoid_templates:
 
 Default datasets snapshotted: `san-pool/nfs` (production), `san-pool/smb` (production), `san-pool/iscsi` (vm_storage).
 
-### 8. Idempotency
+### 9. Idempotency
 
 Always ensure tasks are idempotent:
 
@@ -308,7 +357,7 @@ Always ensure tasks are idempotent:
   failed_when: result.rc != 0 and 'already exists' not in result.stderr
 ```
 
-### 9. Secrets Management
+### 10. Secrets Management
 
 **Never commit plain text secrets!**
 
@@ -514,6 +563,7 @@ ssh storage-b 'zpool status san-pool'
 
 ## Change Log
 
+- **2026-03-01**: Added Rocky Linux 9 support alongside Debian 12 — every role now dispatches to OS-specific task/vars files (`{Debian,RedHat}.yml`) via `ansible_os_family`, covering package management, repo setup, service names, PAM configuration, monitoring paths, and reboot-required detection
 - **2026-02-23**: Added `os-upgrade.yml` rolling upgrade playbook and `docs/os-upgrade.md` — automates pre-upgrade health checks, standby/failover, iSCSI verification, and post-upgrade rejoin
 - **2026-02-20**: Comprehensive CLAUDE.md update — added architecture overview, playbook tags, new monitoring exporters (stonith-probe, reboot-required-exporter), ZFS tunable notes, Sanoid snapshot policy, complete firewall port table, NFS security doc, dataset best practices doc, HTML design/ops docs, stonith-migration doc, full deployment workflow
 - **2025-02-16**: Added Cockpit HA configuration (VIP + shared storage config sync)

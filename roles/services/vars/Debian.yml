@@ -1,0 +1,20 @@
+---
+# OS-specific variables for Debian — services role
+
+_nfs_packages:
+  - nfs-kernel-server
+  - nfs-common
+
+_nfs_server_service: nfs-kernel-server
+
+_samba_packages:
+  - samba
+  - samba-common
+
+_samba_services:
+  - smbd
+  - nmbd
+
+_iscsi_client_target_packages:
+  - targetcli-fb
+  - python3-rtslib-fb

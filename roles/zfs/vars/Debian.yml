@@ -1,0 +1,21 @@
+---
+# OS-specific variables for Debian — ZFS role
+
+_zfs_prereq_packages:
+  - "linux-headers-{{ ansible_kernel }}"
+  - dkms
+  - dpkg-dev
+
+_zfs_packages:
+  - zfsutils-linux
+  - zfs-dkms
+  - zfs-zed
+
+_sanoid_packages:
+  - debhelper
+  - libcapture-tiny-perl
+  - libconfig-inifiles-perl
+  - pv
+  - lzop
+  - mbuffer
+  - sanoid

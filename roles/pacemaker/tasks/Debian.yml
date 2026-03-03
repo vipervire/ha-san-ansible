@@ -1,0 +1,15 @@
+---
+# roles/pacemaker/tasks/Debian.yml — Debian-specific Pacemaker installation
+
+- name: Install Pacemaker and Corosync
+  ansible.builtin.apt:
+    name: "{{ _pacemaker_packages }}"
+    state: present
+
+- name: Install TP-Link Kasa fence agent dependencies
+  ansible.builtin.apt:
+    name: "{{ _pacemaker_kasa_packages }}"
+    state: present
+  when: >
+    stonith_nodes is defined and
+    stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0

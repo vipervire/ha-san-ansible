@@ -1,14 +1,17 @@
 ---
 # roles/monitoring/tasks/main.yml — Prometheus exporters for HA SAN nodes
 
-- name: Install prometheus-node-exporter
-  ansible.builtin.apt:
-    name: prometheus-node-exporter
-    state: present
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
+
+- name: Include OS-specific monitoring package installation
+  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
+
+# ─── Shared monitoring configuration (OS-independent) ───────────────────────
 
 - name: Configure node_exporter to listen on management VLAN only
   ansible.builtin.copy:
-    dest: /etc/default/prometheus-node-exporter
+    dest: "{{ _node_exporter_env_file }}"
     mode: "0644"
     content: |
       ARGS="--web.listen-address={{ mgmt_ip | default('0.0.0.0') }}:9100 \
@@ -29,7 +32,7 @@
     dest: /etc/prometheus/node-exporter-web.yml
     mode: "0640"
     owner: root
-    group: prometheus
+    group: "{{ _node_exporter_group }}"
   when: node_exporter_tls_enabled | default(false)
   notify: restart node_exporter
 
@@ -38,18 +41,16 @@
     path: /var/lib/prometheus/node-exporter
     state: directory
     mode: "0755"
-    owner: prometheus
-    group: prometheus
+    owner: "{{ _node_exporter_user }}"
+    group: "{{ _node_exporter_group }}"
 
 - name: Enable node_exporter service
   ansible.builtin.systemd:
-    name: prometheus-node-exporter
+    name: "{{ _node_exporter_service }}"
     enabled: true
     state: started
 
 # ─── Script-based timer exporters ─────────────────────────────────────────
-# Each exporter follows the same pattern: script + .service + .timer + enable.
-# See tasks/deploy_timer_exporter.yml for the shared implementation.
 - name: Deploy timer-based exporters
   ansible.builtin.include_tasks: deploy_timer_exporter.yml
   loop:
@@ -71,13 +72,7 @@
   loop_control:
     loop_var: exporter
 
-# ─── rasdaemon (required by ras-exporter) ──────────────────────────────────
-- name: Install rasdaemon
-  ansible.builtin.apt:
-    name: rasdaemon
-    state: present
-  when: ras_monitoring_enabled | default(false)
-
+# ─── rasdaemon service ───────────────────────────────────────────────────
 - name: Enable rasdaemon service
   ansible.builtin.systemd:
     name: rasdaemon
@@ -85,31 +80,18 @@
     state: started
   when: ras_monitoring_enabled | default(false)
 
-# ─── smartmontools (required by smart-exporter) ────────────────────────────
-- name: Install smartmontools
-  ansible.builtin.apt:
-    name: smartmontools
-    state: present
-  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
-
 # ─── HA Cluster Exporter (Pacemaker/Corosync metrics) ──────────────────────
-- name: Install prometheus-hacluster-exporter
-  ansible.builtin.apt:
-    name: prometheus-hacluster-exporter
-    state: present
-  when: ha_cluster_monitoring_enabled | default(true)
-
 - name: Configure ha_cluster_exporter to listen on management VLAN only
   ansible.builtin.template:
     src: ha-cluster-exporter-default.j2
-    dest: /etc/default/prometheus-hacluster-exporter
+    dest: "{{ _ha_cluster_exporter_env_file }}"
     mode: "0644"
   when: ha_cluster_monitoring_enabled | default(true)
   notify: restart ha_cluster_exporter
 
 - name: Enable and start ha_cluster_exporter service
   ansible.builtin.systemd:
-    name: prometheus-hacluster-exporter
+    name: "{{ _ha_cluster_exporter_service }}"
     enabled: true
     state: started
   when: ha_cluster_monitoring_enabled | default(true)

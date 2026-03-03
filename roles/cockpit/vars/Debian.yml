@@ -1,0 +1,14 @@
+---
+# OS-specific variables for Debian — cockpit role
+
+_cockpit_packages:
+  - cockpit
+  - cockpit-storaged
+  - cockpit-networkmanager
+  - cockpit-packagekit
+
+_45drives_repo_url: >-
+  deb [arch=amd64 signed-by=/usr/share/keyrings/45drives-archive-keyring.gpg]
+  https://repo.45drives.com/debian {{ ansible_distribution_release }} main
+
+_45drives_keyring_path: /usr/share/keyrings/45drives-archive-keyring.gpg

@@ -1,5 +1,6 @@
 # Managed by Ansible — do not edit manually
-{% for server in ntp_servers %}
+{% set _ntp_list = ntp_servers if (ntp_servers | length > 0) else _default_ntp_servers %}
+{% for server in _ntp_list %}
 server {{ server }} iburst
 {% endfor %}
 

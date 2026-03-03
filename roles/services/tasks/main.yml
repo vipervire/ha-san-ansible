@@ -2,22 +2,19 @@
 # roles/services/tasks/main.yml — NFS, SMB, and client-facing iSCSI configuration
 # These services are INSTALLED but NOT ENABLED — Pacemaker manages start/stop.
 
-# ─── NFS ────────────────────────────────────────────────────────────────────
-- name: Install NFS server
-  ansible.builtin.apt:
-    name:
-      - nfs-kernel-server
-      - nfs-common
-    state: present
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
+- name: Include OS-specific package installation tasks
+  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
+
+# ─── NFS ────────────────────────────────────────────────────────────────────
 - name: Disable NFS auto-start (Pacemaker manages this)
   ansible.builtin.systemd:
-    name: nfs-kernel-server
+    name: "{{ _nfs_server_service }}"
     enabled: false
 
 # ─── Shared cluster configuration directory ───────────────────────────────
-# These tasks write to the ZFS pool, which exists only on one node at a time.
-# run_once + delegate_to ensures they execute on the node that has the pool mounted.
 - name: Create cluster config directory structure on shared pool
   ansible.builtin.file:
     path: "/{{ zfs_pool_name }}/cluster-config/{{ item }}"
@@ -61,8 +58,6 @@
   delegate_to: "{{ pacemaker_preferred_node }}"
 
 # ─── Symlink local config paths to shared storage ─────────────────────────
-# force: true replaces an existing regular file with the symlink in one step,
-# making a separate stat + conditional-remove pattern unnecessary.
 - name: Symlink /etc/exports to shared storage
   ansible.builtin.file:
     src: "/{{ zfs_pool_name }}/cluster-config/nfs/exports"
@@ -77,20 +72,11 @@
     mode: "0644"
 
 # ─── Samba / SMB ────────────────────────────────────────────────────────────
-- name: Install Samba
-  ansible.builtin.apt:
-    name:
-      - samba
-      - samba-common
-    state: present
-
 - name: Disable Samba auto-start (Pacemaker manages this)
   ansible.builtin.systemd:
     name: "{{ item }}"
     enabled: false
-  loop:
-    - smbd
-    - nmbd
+  loop: "{{ _samba_services }}"
 
 - name: Symlink /etc/samba/smb.conf to shared storage
   ansible.builtin.file:
@@ -107,14 +93,6 @@
     force: true
 
 # ─── Client-facing iSCSI target (Pacemaker-managed, optional ACLs + CHAP) ──
-- name: Install targetcli for client-facing iSCSI target
-  ansible.builtin.apt:
-    name:
-      - targetcli-fb
-      - python3-rtslib-fb
-    state: present
-  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
-
 - name: Generate client iSCSI target setup script
   ansible.builtin.template:
     src: setup-client-iscsi-target.sh.j2

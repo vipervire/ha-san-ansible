@@ -1,0 +1,16 @@
+---
+# roles/pacemaker/tasks/RedHat.yml — Rocky Linux-specific Pacemaker installation
+
+- name: Install High Availability repo
+  ansible.builtin.dnf:
+    name: "{{ _pacemaker_packages }}"
+    state: present
+    enablerepo: highavailability
+
+- name: Install TP-Link Kasa fence agent dependencies
+  ansible.builtin.dnf:
+    name: "{{ _pacemaker_kasa_packages }}"
+    state: present
+  when: >
+    stonith_nodes is defined and
+    stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0

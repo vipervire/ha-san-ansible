@@ -71,9 +71,10 @@ corosync_nodes:
 # ---------------------------------------------------------------------------
 # NTP
 # ---------------------------------------------------------------------------
-ntp_servers:
-  - "0.debian.pool.ntp.org"
-  - "1.debian.pool.ntp.org"
+# Set explicit NTP servers here, or leave empty to use OS-specific defaults:
+#   Debian: 0.debian.pool.ntp.org, 1.debian.pool.ntp.org
+#   Rocky:  0.pool.ntp.org, 1.pool.ntp.org
+ntp_servers: []
 
 # ---------------------------------------------------------------------------
 # Monitoring — Cluster metrics (Pacemaker/Corosync)

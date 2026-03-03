@@ -1,0 +1,27 @@
+---
+# roles/cockpit/tasks/RedHat.yml — Rocky Linux-specific Cockpit + 45Drives installation
+
+- name: Install Cockpit
+  ansible.builtin.dnf:
+    name: "{{ _cockpit_packages }}"
+    state: present
+
+# ─── 45Drives Houston plugins ─────────────────────────────────────────────
+- name: Add 45Drives RPM repository
+  ansible.builtin.yum_repository:
+    name: 45drives
+    description: 45Drives Repository
+    baseurl: "{{ _45drives_repo_url }}"
+    gpgcheck: true
+    gpgkey: https://repo.45drives.com/key/gpg
+    enabled: true
+  register: repo_add
+
+- name: Install 45Drives Houston Cockpit plugins
+  ansible.builtin.dnf:
+    name:
+      - cockpit-file-sharing
+      - cockpit-identities
+      - cockpit-navigator
+    state: present
+  ignore_errors: true  # repo may not have packages for your arch/release

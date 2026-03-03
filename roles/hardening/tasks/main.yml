@@ -1,5 +1,10 @@
 ---
 # roles/hardening/tasks/main.yml — Security hardening for all nodes
+# Dispatches to OS-specific task files for package installation,
+# then runs shared tasks that are identical across both OSes.
+
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
 # ─── SSH Hardening ──────────────────────────────────────────────────────────
 - name: Deploy SSH hardening config
@@ -19,10 +24,8 @@
   notify: reload hardening sysctl
 
 # ─── nftables Firewall ────────────────────────────────────────────────────
-- name: Install nftables
-  ansible.builtin.apt:
-    name: nftables
-    state: present
+- name: Include OS-specific package installation tasks
+  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
 
 - name: Deploy nftables ruleset
   ansible.builtin.template:
@@ -45,9 +48,8 @@
     mode: "0644"
 
 - name: Enable PAM faillock module
-  ansible.builtin.command: pam-auth-update --enable faillock
+  ansible.builtin.command: "{{ _pam_faillock_command }}"
   changed_when: false
-  # pam-auth-update is idempotent — safe to re-run
 
 # ─── Disable unnecessary services ─────────────────────────────────────────
 - name: Disable IPv6 if not needed
@@ -62,8 +64,8 @@
 
 # ─── auditd ───────────────────────────────────────────────────────────────
 - name: Install auditd
-  ansible.builtin.apt:
-    name: auditd
+  ansible.builtin.package:
+    name: "{{ _hardening_packages.auditd }}"
     state: present
   when: auditd_enabled | default(false)
 
@@ -84,8 +86,8 @@
 
 # ─── syslog forwarding ────────────────────────────────────────────────────
 - name: Install rsyslog
-  ansible.builtin.apt:
-    name: rsyslog
+  ansible.builtin.package:
+    name: "{{ _hardening_packages.rsyslog }}"
     state: present
   when: syslog_remote_enabled | default(false)
 
@@ -99,8 +101,8 @@
 
 # ─── hardware watchdog ────────────────────────────────────────────────────
 - name: Install watchdog
-  ansible.builtin.apt:
-    name: watchdog
+  ansible.builtin.package:
+    name: "{{ _hardening_packages.watchdog }}"
     state: present
   when: watchdog_enabled | default(false)
 

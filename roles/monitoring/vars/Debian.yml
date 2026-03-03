@@ -1,0 +1,15 @@
+---
+# OS-specific variables for Debian — monitoring role
+
+_node_exporter_package: prometheus-node-exporter
+_node_exporter_service: prometheus-node-exporter
+_node_exporter_env_file: /etc/default/prometheus-node-exporter
+_node_exporter_user: prometheus
+_node_exporter_group: prometheus
+
+_ha_cluster_exporter_package: prometheus-hacluster-exporter
+_ha_cluster_exporter_service: prometheus-hacluster-exporter
+_ha_cluster_exporter_env_file: /etc/default/prometheus-hacluster-exporter
+
+_rasdaemon_package: rasdaemon
+_smartmontools_package: smartmontools

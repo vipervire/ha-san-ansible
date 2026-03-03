@@ -1,24 +1,13 @@
 ---
 # roles/pacemaker/tasks/main.yml — Pacemaker/Corosync cluster setup
 
-- name: Install Pacemaker and Corosync
-  ansible.builtin.apt:
-    name:
-      - pacemaker
-      - corosync
-      - pcs
-      - crmsh
-      - fence-agents
-    state: present
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
-- name: Install TP-Link Kasa fence agent dependencies
-  ansible.builtin.apt:
-    name:
-      - python3-kasa
-    state: present
-  when: >
-    stonith_nodes is defined and
-    stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0
+- name: Include OS-specific Pacemaker installation tasks
+  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
+
+# ─── Shared Pacemaker configuration (OS-independent) ────────────────────────
 
 - name: Set hacluster user password
   ansible.builtin.user:

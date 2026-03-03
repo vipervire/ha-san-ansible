@@ -1,0 +1,19 @@
+---
+# roles/hardening/tasks/RedHat.yml — RHEL/Rocky-specific package installation
+
+- name: Install nftables
+  ansible.builtin.dnf:
+    name: "{{ _hardening_packages.nftables }}"
+    state: present
+
+- name: Disable firewalld (using nftables directly instead)
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Mask firewalld to prevent accidental re-enable
+  ansible.builtin.systemd:
+    name: firewalld
+    masked: true

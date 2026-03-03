@@ -1,0 +1,32 @@
+---
+# OS-specific variables for RHEL/Rocky Linux
+
+_common_packages:
+  - ca-certificates
+  - curl
+  - gnupg2
+  - sudo
+  - vim-enhanced
+  - tmux
+  - htop
+  - iotop
+  - net-tools
+  - bind-utils
+  - rsync
+  - chrony
+  - python3
+
+_common_auto_update_packages:
+  - dnf-automatic
+
+_common_remove_packages:
+  - avahi
+  - cups
+  - bluez
+  - ModemManager
+
+_chrony_config_path: /etc/chrony.conf
+
+_default_ntp_servers:
+  - "0.pool.ntp.org"
+  - "1.pool.ntp.org"

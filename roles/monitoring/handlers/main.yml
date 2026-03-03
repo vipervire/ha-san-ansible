@@ -1,7 +1,7 @@
 ---
 - name: restart node_exporter
   ansible.builtin.systemd:
-    name: prometheus-node-exporter
+    name: "{{ _node_exporter_service | default('prometheus-node-exporter') }}"
     state: restarted
 
 - name: reload systemd
@@ -10,5 +10,5 @@
 
 - name: restart ha_cluster_exporter
   ansible.builtin.systemd:
-    name: prometheus-hacluster-exporter
+    name: "{{ _ha_cluster_exporter_service | default('prometheus-hacluster-exporter') }}"
     state: restarted

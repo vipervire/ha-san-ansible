@@ -1,16 +1,17 @@
 ---
 # roles/iscsi-target/tasks/main.yml — Backend LIO iSCSI target (always running)
 
+- name: Load OS-specific variables
+  ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
+
 - name: Install LIO target packages
-  ansible.builtin.apt:
-    name:
-      - targetcli-fb
-      - python3-rtslib-fb
+  ansible.builtin.package:
+    name: "{{ _iscsi_target_packages }}"
     state: present
 
 - name: Enable LIO target persistence service
   ansible.builtin.systemd:
-    name: rtslib-fb-targetctl
+    name: "{{ _iscsi_target_service }}"
     enabled: true
 
 - name: Generate targetcli setup script
@@ -32,8 +33,6 @@
     cmd: /root/setup-lio-target.sh
   when: lio_check.rc != 0 or (force_iscsi_reconfigure | default(false) | bool)
   notify: save lio config
-  # To force re-run after a failed partial setup:
-  #   ansible-playbook -i inventory.yml site.yml --tags storage -e force_iscsi_reconfigure=true
 
 - name: Set permissions on saveconfig.json
   ansible.builtin.file:
