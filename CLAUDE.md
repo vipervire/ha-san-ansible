@@ -57,6 +57,7 @@ This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI S
     ├── prometheus-recording-rules.yml  # Recording rules for aggregation
     ├── stonith-migration.md       # Migrating from old global stonith_method to per-node dict
     ├── stonith-smart-plugs.md     # Smart plug fencing guide (Kasa, Tasmota, ESPHome, HTTP)
+    ├── watchdog.md                # Hardware/software watchdog setup, module options, troubleshooting
     ├── os-upgrade.md              # Rolling OS upgrade guide — dist-upgrade and full reinstall
     └── upgrade-procedure.md       # Manual upgrade reference (pre-dates os-upgrade.yml)
 ```
@@ -563,6 +564,8 @@ ssh storage-b 'zpool status san-pool'
 
 ## Change Log
 
+- **2026-03-04**: Added per-node watchdog overrides — any `watchdog_*` variable can be set in `host_vars/<node>.yml` to use a different module or settings per node (e.g. `iTCO_wdt` on storage-a, `softdog` on storage-b); added commented examples to `host_vars/storage-{a,b}.yml` and per-node configuration section in `docs/watchdog.md`
+- **2026-03-04**: Added watchdog support — kernel module loading (`watchdog_module`, defaults to `softdog`), boot persistence via `modules-load.d`, optional modprobe options via `watchdog-modprobe.conf.j2`, realtime daemon scheduling, and `docs/watchdog.md` covering hardware/software modules, STONITH relationship, verification, and troubleshooting
 - **2026-03-01**: Added Rocky Linux 9 support alongside Debian 12 — every role now dispatches to OS-specific task/vars files (`{Debian,RedHat}.yml`) via `ansible_os_family`, covering package management, repo setup, service names, PAM configuration, monitoring paths, and reboot-required detection
 - **2026-02-23**: Added `os-upgrade.yml` rolling upgrade playbook and `docs/os-upgrade.md` — automates pre-upgrade health checks, standby/failover, iSCSI verification, and post-upgrade rejoin
 - **2026-02-20**: Comprehensive CLAUDE.md update — added architecture overview, playbook tags, new monitoring exporters (stonith-probe, reboot-required-exporter), ZFS tunable notes, Sanoid snapshot policy, complete firewall port table, NFS security doc, dataset best practices doc, HTML design/ops docs, stonith-migration doc, full deployment workflow

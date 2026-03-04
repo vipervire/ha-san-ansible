@@ -110,8 +110,29 @@ syslog_remote_enabled: false
 # syslog_remote_port: 514
 # syslog_remote_protocol: "udp"   # or "tcp"
 
-# Hardware watchdog — reboots node if OS hangs
+# Hardware / software watchdog — reboots node if OS hangs
+# The watchdog daemon pets /dev/watchdog every `watchdog_interval` seconds.
+# If it stops (OS hang, kernel panic), the hardware or softdog timer expires
+# and forces a reset — complementing STONITH with self-fencing.
+#
+# Kernel modules:
+#   softdog         — software watchdog, available on all x86 systems (default)
+#   iTCO_wdt        — Intel TCO hardware watchdog (most Intel server boards)
+#   ipmi_watchdog   — IPMI BMC watchdog (requires IPMI/BMC)
+#   sp5100_tco      — AMD server board watchdog
+#   mpc8xxx_wdt     — Freescale/NXP PowerPC (rare in this context)
+#
+# For softdog, the kernel timeout is set by the soft_margin module parameter
+# (default 60s). Set watchdog_module_options: {soft_margin: "60"} to match
+# watchdog_timeout if you change it.
+#
+# Per-node overrides: any of these variables can be set in host_vars/<node>.yml
+# to use a different watchdog module or settings on each node independently.
+# For example, storage-a may have iTCO_wdt while storage-b uses softdog.
+# See host_vars/storage-{a,b}.yml for commented examples and docs/watchdog.md.
 watchdog_enabled: false
+# watchdog_module: "softdog"          # kernel module to load; creates /dev/watchdog
+# watchdog_module_options: {}         # modprobe options, e.g. {soft_margin: "60", nowayout: "0"}
 # watchdog_device: "/dev/watchdog"
 # watchdog_timeout: 60
 # watchdog_interval: 10
