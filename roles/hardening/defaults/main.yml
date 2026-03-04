@@ -18,6 +18,8 @@ syslog_remote_enabled: false
 # syslog_remote_protocol: "udp"
 
 watchdog_enabled: false
+# watchdog_module: "softdog"        # softdog (sw) or hardware module e.g. iTCO_wdt, ipmi_watchdog
+# watchdog_module_options: {}       # extra modprobe key/value options, e.g. {nowayout: "0"}
 # watchdog_device: "/dev/watchdog"
 # watchdog_timeout: 60
 # watchdog_interval: 10

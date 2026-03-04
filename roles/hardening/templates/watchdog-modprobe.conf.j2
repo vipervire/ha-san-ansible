@@ -1,0 +1,4 @@
+# Managed by Ansible — {{ watchdog_module }} module options
+{% for key, value in watchdog_module_options.items() %}
+options {{ watchdog_module }} {{ key }}={{ value }}
+{% endfor %}

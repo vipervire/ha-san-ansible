@@ -99,14 +99,41 @@
   when: syslog_remote_enabled | default(false)
   notify: restart rsyslog
 
-# ─── hardware watchdog ────────────────────────────────────────────────────
-- name: Install watchdog
+# ─── hardware / software watchdog ─────────────────────────────────────────
+- name: Persist watchdog kernel module across reboots
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/watchdog.conf
+    content: "{{ watchdog_module }}\n"
+    mode: "0644"
+  when:
+    - watchdog_enabled | default(false)
+    - watchdog_module | default('') | length > 0
+
+- name: Deploy watchdog kernel module options
+  ansible.builtin.template:
+    src: watchdog-modprobe.conf.j2
+    dest: "/etc/modprobe.d/{{ watchdog_module }}.conf"
+    mode: "0644"
+  when:
+    - watchdog_enabled | default(false)
+    - watchdog_module | default('') | length > 0
+    - watchdog_module_options | default({}) | length > 0
+
+- name: Load watchdog kernel module
+  ansible.builtin.command:
+    cmd: "modprobe {{ watchdog_module }}"
+  changed_when: false
+  when:
+    - watchdog_enabled | default(false)
+    - watchdog_module | default('') | length > 0
+
+- name: Install watchdog daemon
   ansible.builtin.package:
     name: "{{ _hardening_packages.watchdog }}"
     state: present
   when: watchdog_enabled | default(false)
 
-- name: Deploy watchdog configuration
+- name: Deploy watchdog daemon configuration
   ansible.builtin.template:
     src: watchdog.conf.j2
     dest: /etc/watchdog.conf

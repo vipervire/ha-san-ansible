@@ -1,7 +1,13 @@
-# Managed by Ansible — hardware watchdog configuration
+# Managed by Ansible — watchdog daemon configuration
+# Hardware or software watchdog (module: {{ watchdog_module | default('softdog') }})
 watchdog-device = {{ watchdog_device | default('/dev/watchdog') }}
 watchdog-timeout = {{ watchdog_timeout | default(60) }}
 interval = {{ watchdog_interval | default(10) }}
 log-dir = /var/log/watchdog
 max-load-1 = {{ watchdog_max_load | default(24.0) }}
 min-memory = {{ watchdog_min_memory | default(1) }}
+
+# Run as a real-time process to prevent watchdog starvation under high CPU load.
+# Priority 1 is the minimum RT priority; sufficient to pre-empt normal tasks.
+realtime = yes
+priority = 1
