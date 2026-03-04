@@ -27,3 +27,11 @@
   ansible.builtin.systemd:
     name: watchdog
     state: restarted
+
+- name: reload watchdog module
+  ansible.builtin.shell: |
+    systemctl stop watchdog 2>/dev/null || true
+    modprobe -r {{ watchdog_module }} 2>/dev/null || true
+    modprobe {{ watchdog_module }}
+    systemctl start watchdog 2>/dev/null || true
+  when: watchdog_module | default('') | length > 0
