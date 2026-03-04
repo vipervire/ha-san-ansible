@@ -139,6 +139,15 @@ watchdog_enabled: false
 # watchdog_max_load: 24.0
 # watchdog_min_memory: 1
 
+# ---------------------------------------------------------------------------
+# 45Drives Houston Cockpit plugins — GPG key fingerprint
+# ---------------------------------------------------------------------------
+# Pinned fingerprint of the 45Drives package signing key (repo@45drives.com).
+# The cockpit role verifies the downloaded key matches this fingerprint before
+# adding the repository, guarding against CDN compromise or DNS hijack.
+# Verify out-of-band: gpg --with-fingerprint --with-colons /tmp/45drives-gpg.asc
+fortyfive_drives_gpg_fingerprint: "3FBD7E034E80BAF63D5AA9BB98899BBC7318C72B"
+
 # Rate limiting for Cockpit (9090) and pcsd (2224) — brute-force protection
 firewall_rate_limit_enabled: true
 

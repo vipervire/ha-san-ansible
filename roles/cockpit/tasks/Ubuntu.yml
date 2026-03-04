@@ -17,13 +17,37 @@
       from the 45Drives repository (may not have Ubuntu-compatible packages).
   when: not (cockpit_45drives_enabled | default(false))
 
-- name: Add 45Drives GPG signing key (Ubuntu, opt-in)
+- name: Download 45Drives GPG signing key (ASCII-armored, Ubuntu opt-in)
   ansible.builtin.get_url:
-    url: https://repo.45drives.com/key/gpg
-    dest: "{{ _45drives_keyring_path }}"
+    url: https://repo.45drives.com/key/gpg.asc
+    dest: /tmp/45drives-gpg.asc
     mode: "0644"
-    checksum: "{{ fortyfive_drives_gpg_checksum | default(omit) }}"
   register: key_download
+  when: cockpit_45drives_enabled | default(false)
+
+- name: Verify 45Drives GPG key fingerprint (Ubuntu)
+  # Guards against CDN compromise or DNS hijack substituting a malicious key.
+  # Fingerprint is pinned in group_vars/all.yml (fortyfive_drives_gpg_fingerprint).
+  ansible.builtin.shell:
+    cmd: >
+      gpg --with-fingerprint --with-colons /tmp/45drives-gpg.asc 2>/dev/null
+      | grep -i "{{ fortyfive_drives_gpg_fingerprint }}"
+  changed_when: false
+  when:
+    - cockpit_45drives_enabled | default(false)
+    - key_download is succeeded
+
+- name: Dearmor 45Drives GPG signing key into keyring (Ubuntu)
+  ansible.builtin.command:
+    cmd: "gpg --batch --yes --dearmor -o {{ _45drives_keyring_path }} /tmp/45drives-gpg.asc"
+  when:
+    - cockpit_45drives_enabled | default(false)
+    - key_download is changed
+
+- name: Remove temporary 45Drives GPG key file (Ubuntu)
+  ansible.builtin.file:
+    path: /tmp/45drives-gpg.asc
+    state: absent
   when: cockpit_45drives_enabled | default(false)
 
 - name: Add 45Drives apt repository (Ubuntu, opt-in)
@@ -40,7 +64,7 @@
     update_cache: true
   when:
     - cockpit_45drives_enabled | default(false)
-    - key_download.changed | default(false)
+    - key_download is changed
 
 - name: Install 45Drives Houston Cockpit plugins (Ubuntu, opt-in)
   ansible.builtin.apt:
