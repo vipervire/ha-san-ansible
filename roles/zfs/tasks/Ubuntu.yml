@@ -1,0 +1,20 @@
+---
+# roles/zfs/tasks/Ubuntu.yml — Ubuntu-specific ZFS installation
+# Ubuntu ships ZFS in the 'universe' repository natively; no contrib repo or DKMS build needed.
+
+- name: Enable universe repository
+  ansible.builtin.apt_repository:
+    repo: "deb http://archive.ubuntu.com/ubuntu {{ ansible_distribution_release }} universe"
+    state: present
+    filename: ubuntu-universe
+
+- name: Install ZFS prerequisites
+  ansible.builtin.apt:
+    name: "{{ _zfs_prereq_packages }}"
+    state: present
+    update_cache: true
+
+- name: Install ZFS packages
+  ansible.builtin.apt:
+    name: "{{ _zfs_packages }}"
+    state: present

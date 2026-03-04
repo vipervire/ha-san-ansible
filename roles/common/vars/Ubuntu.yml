@@ -1,0 +1,6 @@
+---
+# OS-specific variable overrides for Ubuntu — common role
+
+_default_ntp_servers:
+  - "ntp.ubuntu.com"
+  - "0.ubuntu.pool.ntp.org"

@@ -23,7 +23,7 @@
 #   ansible-playbook -i inventory.yml site.yml --check --diff
 #
 # Prerequisites:
-#   - Fresh Debian 12 or Rocky Linux 9 minimal install on all three nodes
+#   - Fresh Debian 12, Ubuntu 22.04/24.04, Rocky Linux 9, or AlmaLinux 9 minimal install on all three nodes
 #   - SSH key access as storageadmin with sudo
 #   - Network connectivity on management VLAN between all nodes
 #   - Disks identified and listed in host_vars
@@ -122,6 +122,23 @@
           'offline' in existing_cluster_status.stdout.lower() or
           'FAILED' in existing_cluster_status.stdout
         - not (skip_cluster_check | default(false) | bool)
+
+# ─── Pre-flight: Validate supported OS on all cluster nodes ─────────────────
+- name: "Validate supported operating system (all nodes)"
+  hosts: cluster
+  gather_facts: true
+  tags: [always]
+  tasks:
+    - name: Assert this OS is supported by the playbook
+      ansible.builtin.assert:
+        that:
+          - >-
+            (ansible_distribution == 'Debian' and ansible_distribution_major_version == '12') or
+            (ansible_distribution == 'Ubuntu' and ansible_distribution_major_version in ['22', '24']) or
+            (ansible_distribution in ['Rocky', 'AlmaLinux'] and ansible_distribution_major_version == '9')
+        fail_msg: >
+          Unsupported OS: {{ ansible_distribution }} {{ ansible_distribution_version }}.
+          Supported: Debian 12, Ubuntu 22.04/24.04, Rocky Linux 9, AlmaLinux 9.
 
 # ─── Play 1: Base setup on ALL nodes ────────────────────────────────────────
 - name: "Base OS setup and hardening (all nodes)"

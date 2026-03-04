@@ -1,8 +1,8 @@
 ---
-# roles/cockpit/tasks/RedHat.yml — Rocky Linux-specific Cockpit + 45Drives installation
+# roles/cockpit/tasks/Ubuntu.yml — Ubuntu-specific Cockpit installation
 
 - name: Install Cockpit
-  ansible.builtin.dnf:
+  ansible.builtin.apt:
     name: "{{ _cockpit_packages }}"
     state: present
 
@@ -24,17 +24,9 @@
   changed_when: false
   when: key_download is succeeded
 
-- name: Install 45Drives GPG key to RPM key directory
-  ansible.builtin.copy:
-    src: /tmp/45drives-gpg.asc
-    dest: "{{ _45drives_keyring_path }}"
-    mode: "0644"
-    remote_src: true
-  when: key_download is changed
-
-- name: Import 45Drives GPG key into RPM keyring
+- name: Dearmor 45Drives GPG signing key into keyring
   ansible.builtin.command:
-    cmd: "rpm --import {{ _45drives_keyring_path }}"
+    cmd: "gpg --batch --yes --dearmor -o {{ _45drives_keyring_path }} /tmp/45drives-gpg.asc"
   when: key_download is changed
 
 - name: Remove temporary 45Drives GPG key file
@@ -42,22 +34,23 @@
     path: /tmp/45drives-gpg.asc
     state: absent
 
-- name: Add 45Drives RPM repository
-  ansible.builtin.yum_repository:
-    name: 45drives
-    description: 45Drives Repository
-    baseurl: "{{ _45drives_repo_url }}"
-    gpgcheck: true
-    gpgkey: "file://{{ _45drives_keyring_path }}"
-    enabled: true
-  register: repo_add
+- name: Add 45Drives apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ _45drives_repo_url }}"
+    state: present
+    filename: 45drives
   when: key_download is succeeded
 
+- name: Update apt cache after adding 45Drives repo
+  ansible.builtin.apt:
+    update_cache: true
+  when: key_download is changed
+
 - name: Install 45Drives Houston Cockpit plugins
-  ansible.builtin.dnf:
+  ansible.builtin.apt:
     name:
       - cockpit-file-sharing
       - cockpit-identities
       - cockpit-navigator
     state: present
-  ignore_errors: true  # repo may not have packages for your arch/release
+  ignore_errors: true  # repo may not have packages for every Ubuntu release

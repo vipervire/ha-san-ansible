@@ -1,0 +1,28 @@
+---
+# roles/pacemaker/tasks/Ubuntu.yml — Ubuntu-specific Pacemaker installation
+
+- name: Install Pacemaker and Corosync
+  ansible.builtin.apt:
+    name: "{{ _pacemaker_packages }}"
+    state: present
+
+- name: Install TP-Link Kasa fence agent dependencies (apt)
+  ansible.builtin.apt:
+    name: "{{ _pacemaker_kasa_packages }}"
+    state: present
+  register: kasa_apt_result
+  failed_when: false
+  when: >
+    stonith_nodes is defined and
+    stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0
+
+- name: Install python-kasa via pip (Ubuntu 22.04 fallback — not in apt)
+  ansible.builtin.pip:
+    name: python-kasa
+    state: present
+    executable: pip3
+  when: >
+    stonith_nodes is defined and
+    stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0 and
+    kasa_apt_result is defined and
+    kasa_apt_result.rc | default(0) != 0

@@ -1,0 +1,29 @@
+---
+# roles/monitoring/tasks/Ubuntu.yml — Ubuntu-specific monitoring package installation
+# prometheus-hacluster-exporter is not available in Ubuntu repos; skip it.
+
+- name: Install prometheus-node-exporter
+  ansible.builtin.apt:
+    name: "{{ _node_exporter_package }}"
+    state: present
+
+- name: Install rasdaemon
+  ansible.builtin.apt:
+    name: "{{ _rasdaemon_package }}"
+    state: present
+  when: ras_monitoring_enabled | default(false)
+
+- name: Install smartmontools
+  ansible.builtin.apt:
+    name: "{{ _smartmontools_package }}"
+    state: present
+  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
+
+- name: Note that ha_cluster_exporter is unavailable on Ubuntu
+  ansible.builtin.debug:
+    msg: >
+      prometheus-hacluster-exporter is not available in Ubuntu repositories.
+      To enable HA cluster metrics, install it manually from:
+      https://github.com/ClusterLabs/ha_cluster_exporter/releases
+      Then set ha_cluster_monitoring_enabled: true in group_vars.
+  when: ha_cluster_monitoring_enabled | default(true)

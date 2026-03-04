@@ -1,0 +1,12 @@
+---
+# OS-specific variable overrides for Ubuntu — cockpit role
+# Only values that differ from Debian.yml are listed here.
+#
+# 45Drives provides a dedicated Ubuntu enterprise repo at:
+#   https://repo.45drives.com/enterprise/ubuntu/
+# Codenames available: focal, jammy, noble — so ansible_distribution_release
+# resolves correctly without pinning to a Debian codename.
+
+_45drives_repo_url: >-
+  deb [arch=amd64 signed-by=/usr/share/keyrings/45drives-archive-keyring.gpg]
+  https://repo.45drives.com/enterprise/ubuntu {{ ansible_distribution_release }} main
