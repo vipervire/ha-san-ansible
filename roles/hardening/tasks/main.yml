@@ -135,6 +135,7 @@
     - watchdog_enabled | default(false)
     - watchdog_module | default('') | length > 0
     - watchdog_module_options | default({}) | length > 0
+  notify: reload watchdog module
 
 - name: Load watchdog kernel module
   ansible.builtin.command:

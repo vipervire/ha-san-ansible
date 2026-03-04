@@ -27,3 +27,13 @@
   ansible.builtin.systemd:
     name: watchdog
     state: restarted
+
+- name: reload watchdog module
+  # Re-load the module so updated modprobe options take effect without rebooting.
+  # Stops the watchdog daemon first to release the device, then reloads the module.
+  ansible.builtin.shell: |
+    systemctl stop watchdog || true
+    modprobe -r {{ watchdog_module }}
+    modprobe {{ watchdog_module }}
+    systemctl start watchdog || true
+  when: watchdog_module | default('') | length > 0
