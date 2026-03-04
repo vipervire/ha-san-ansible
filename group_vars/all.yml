@@ -115,7 +115,7 @@ syslog_remote_enabled: false
 # If it stops (OS hang, kernel panic), the hardware or softdog timer expires
 # and forces a reset — complementing STONITH with self-fencing.
 #
-# Kernel module options:
+# Kernel modules:
 #   softdog         — software watchdog, available on all x86 systems (default)
 #   iTCO_wdt        — Intel TCO hardware watchdog (most Intel server boards)
 #   ipmi_watchdog   — IPMI BMC watchdog (requires IPMI/BMC)
@@ -125,6 +125,11 @@ syslog_remote_enabled: false
 # For softdog, the kernel timeout is set by the soft_margin module parameter
 # (default 60s). Set watchdog_module_options: {soft_margin: "60"} to match
 # watchdog_timeout if you change it.
+#
+# Per-node overrides: any of these variables can be set in host_vars/<node>.yml
+# to use a different watchdog module or settings on each node independently.
+# For example, storage-a may have iTCO_wdt while storage-b uses softdog.
+# See host_vars/storage-{a,b}.yml for commented examples and docs/watchdog.md.
 watchdog_enabled: false
 # watchdog_module: "softdog"          # kernel module to load; creates /dev/watchdog
 # watchdog_module_options: {}         # modprobe options, e.g. {soft_margin: "60", nowayout: "0"}

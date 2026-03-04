@@ -68,3 +68,28 @@ local_data_disks:
 # special_disk:
 #   device: /dev/disk/by-id/nvme-PLACEHOLDER_SPECIAL_B
 #   label: "special-b"
+
+# ---------------------------------------------------------------------------
+# Per-node watchdog overrides (optional)
+# ---------------------------------------------------------------------------
+# These override the global watchdog_* settings from group_vars/all.yml for
+# this node only. Useful when storage-a and storage-b have different hardware
+# (e.g. one has Intel TCO, the other only has softdog).
+#
+# See docs/watchdog.md for full module and option reference.
+#
+# Example — software watchdog (available on all x86 systems):
+# watchdog_enabled: true
+# watchdog_module: softdog
+# watchdog_module_options:
+#   soft_margin: "60"
+#
+# Example — Intel TCO hardware watchdog:
+# watchdog_enabled: true
+# watchdog_module: iTCO_wdt
+# watchdog_timeout: 60
+# watchdog_interval: 10
+#
+# Example — AMD server board:
+# watchdog_enabled: true
+# watchdog_module: sp5100_tco

@@ -43,11 +43,14 @@ If any check fails, the daemon deliberately stops petting the device, triggering
 
 ## Configuration
 
-All variables are set in `group_vars/all.yml` under the watchdog section.
+Global defaults are set in `group_vars/all.yml`. Any variable can be overridden
+per-node in `host_vars/<node>.yml` — useful when your two storage nodes have
+different hardware (e.g. storage-a has an Intel TCO watchdog, storage-b only has softdog).
 
 ### Minimal — software watchdog (recommended for testing)
 
 ```yaml
+# group_vars/all.yml (applies to all nodes)
 watchdog_enabled: true
 watchdog_module: softdog
 ```
@@ -71,6 +74,44 @@ watchdog_device: /dev/watchdog
 watchdog_timeout: 60
 watchdog_interval: 10
 ```
+
+### Per-node configuration (mixed hardware)
+
+When your nodes have different hardware, set the global enable in `group_vars/all.yml`
+and override the module (and any other settings) per-node in `host_vars/`:
+
+```yaml
+# group_vars/all.yml — enable on all storage nodes
+watchdog_enabled: true
+watchdog_timeout: 60
+watchdog_interval: 10
+```
+
+```yaml
+# host_vars/storage-a.yml — enterprise server with Intel TCO hardware watchdog
+watchdog_module: iTCO_wdt
+```
+
+```yaml
+# host_vars/storage-b.yml — consumer server, fall back to software watchdog
+watchdog_module: softdog
+watchdog_module_options:
+  soft_margin: "60"
+```
+
+You can also enable the watchdog on only one node by overriding `watchdog_enabled`:
+
+```yaml
+# group_vars/all.yml
+watchdog_enabled: false          # off by default
+
+# host_vars/storage-a.yml
+watchdog_enabled: true           # override: enable only on storage-a
+watchdog_module: iTCO_wdt
+```
+
+All `watchdog_*` variables follow standard Ansible variable precedence:
+`host_vars` overrides `group_vars` overrides `defaults/main.yml`.
 
 ### Full configuration reference
 
