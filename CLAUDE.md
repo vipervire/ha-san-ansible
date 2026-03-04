@@ -303,7 +303,7 @@ roles/<role>/
 | ZFS packages | `zfsutils-linux`, `zfs-dkms`, `zfs-zed` | `zfsutils-linux`, `zfs-zed` (no DKMS) | `zfs`, `zfs-dkms` |
 | Sanoid | apt | 24.04: apt; **22.04: manual install** | EPEL |
 | ha_cluster_exporter | apt | **not in repos — manual install** | manual install |
-| 45Drives plugins | yes | yes (dedicated Ubuntu repo) | no |
+| 45Drives plugins | yes | yes (dedicated Ubuntu repo) | yes (Rocky enterprise repo) |
 | python3-kasa | apt | 24.04: apt; 22.04: pip fallback | pip |
 | NTP servers | `*.debian.pool.ntp.org` | `ntp.ubuntu.com` | `*.rocky.pool.ntp.org` |
 | Chrony config | `/etc/chrony/chrony.conf` | `/etc/chrony/chrony.conf` | `/etc/chrony.conf` |

@@ -87,7 +87,16 @@ auth sufficient pam_faillock.so authsucc
 
 ### Cockpit — 45Drives plugins
 
-45Drives Houston plugins (`cockpit-file-sharing`, `cockpit-identities`, `cockpit-navigator`) are installed on Ubuntu using the dedicated Ubuntu enterprise repo at `https://repo.45drives.com/enterprise/ubuntu`, which hosts packages for `jammy` and `noble`. Installation uses `ignore_errors: true` in case a specific plugin is unavailable for the running release.
+45Drives Houston plugins (`cockpit-file-sharing`, `cockpit-identities`, `cockpit-navigator`) are installed on all supported OSes:
+
+| OS | Repo URL | Notes |
+|----|----------|-------|
+| Debian 12 | `https://repo.45drives.com/debian bookworm main` | apt, signed-by keyring |
+| Ubuntu 22.04/24.04 | `https://repo.45drives.com/enterprise/ubuntu jammy\|noble main` | apt, signed-by keyring |
+| Rocky Linux 9 | `https://repo.45drives.com/rockylinux/el9` | dnf/yum repo, gpgcheck enabled |
+| AlmaLinux 9 | `https://repo.45drives.com/rockylinux/el9` | binary-compatible with Rocky; uses the same repo |
+
+Installation uses `ignore_errors: true` on all platforms in case a specific plugin is unavailable for the running release.
 
 ### python3-kasa — pip fallback on 22.04
 
@@ -134,5 +143,5 @@ All three nodes work with the same `site.yml` playbook — OS-specific handling 
 | Debian | 12 | DKMS | apt | apt | yes |
 | Ubuntu | 22.04 | native | manual | manual | yes |
 | Ubuntu | 24.04 | native | apt | manual | yes |
-| Rocky Linux | 9 | ELRepo RPM | apt (EPEL) | manual | no |
-| AlmaLinux | 9 | ELRepo RPM | apt (EPEL) | manual | no |
+| Rocky Linux | 9 | ELRepo RPM | apt (EPEL) | manual | yes |
+| AlmaLinux | 9 | ELRepo RPM | apt (EPEL) | manual | yes |
