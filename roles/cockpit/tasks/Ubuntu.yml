@@ -1,31 +1,20 @@
 ---
 # roles/cockpit/tasks/Ubuntu.yml — Ubuntu-specific Cockpit installation
-# 45Drives Houston plugins target Debian/CentOS. Skip by default on Ubuntu.
-# Set cockpit_45drives_enabled: true to attempt the 45Drives repo anyway.
 
 - name: Install Cockpit
   ansible.builtin.apt:
     name: "{{ _cockpit_packages }}"
     state: present
 
-# ─── 45Drives Houston plugins (opt-in on Ubuntu) ──────────────────────────
-- name: Note that 45Drives plugins are opt-in on Ubuntu
-  ansible.builtin.debug:
-    msg: >
-      45Drives Houston Cockpit plugins are not officially supported on Ubuntu.
-      Set cockpit_45drives_enabled: true in group_vars to attempt installation
-      from the 45Drives repository (may not have Ubuntu-compatible packages).
-  when: not (cockpit_45drives_enabled | default(false))
-
-- name: Download 45Drives GPG signing key (ASCII-armored, Ubuntu opt-in)
+# ─── 45Drives Houston plugins ─────────────────────────────────────────────
+- name: Download 45Drives GPG signing key (ASCII-armored)
   ansible.builtin.get_url:
     url: https://repo.45drives.com/key/gpg.asc
     dest: /tmp/45drives-gpg.asc
     mode: "0644"
   register: key_download
-  when: cockpit_45drives_enabled | default(false)
 
-- name: Verify 45Drives GPG key fingerprint (Ubuntu)
+- name: Verify 45Drives GPG key fingerprint
   # Guards against CDN compromise or DNS hijack substituting a malicious key.
   # Fingerprint is pinned in group_vars/all.yml (fortyfive_drives_gpg_fingerprint).
   ansible.builtin.shell:
@@ -33,45 +22,35 @@
       gpg --with-fingerprint --with-colons /tmp/45drives-gpg.asc 2>/dev/null
       | grep -i "{{ fortyfive_drives_gpg_fingerprint }}"
   changed_when: false
-  when:
-    - cockpit_45drives_enabled | default(false)
-    - key_download is succeeded
+  when: key_download is succeeded
 
-- name: Dearmor 45Drives GPG signing key into keyring (Ubuntu)
+- name: Dearmor 45Drives GPG signing key into keyring
   ansible.builtin.command:
     cmd: "gpg --batch --yes --dearmor -o {{ _45drives_keyring_path }} /tmp/45drives-gpg.asc"
-  when:
-    - cockpit_45drives_enabled | default(false)
-    - key_download is changed
+  when: key_download is changed
 
-- name: Remove temporary 45Drives GPG key file (Ubuntu)
+- name: Remove temporary 45Drives GPG key file
   ansible.builtin.file:
     path: /tmp/45drives-gpg.asc
     state: absent
-  when: cockpit_45drives_enabled | default(false)
 
-- name: Add 45Drives apt repository (Ubuntu, opt-in)
+- name: Add 45Drives apt repository
   ansible.builtin.apt_repository:
     repo: "{{ _45drives_repo_url }}"
     state: present
     filename: 45drives
-  when:
-    - cockpit_45drives_enabled | default(false)
-    - key_download is succeeded
+  when: key_download is succeeded
 
-- name: Update apt cache after adding 45Drives repo (Ubuntu)
+- name: Update apt cache after adding 45Drives repo
   ansible.builtin.apt:
     update_cache: true
-  when:
-    - cockpit_45drives_enabled | default(false)
-    - key_download is changed
+  when: key_download is changed
 
-- name: Install 45Drives Houston Cockpit plugins (Ubuntu, opt-in)
+- name: Install 45Drives Houston Cockpit plugins
   ansible.builtin.apt:
     name:
       - cockpit-file-sharing
       - cockpit-identities
       - cockpit-navigator
     state: present
-  ignore_errors: true  # repo may not have Ubuntu-compatible packages
-  when: cockpit_45drives_enabled | default(false)
+  ignore_errors: true  # repo may not have packages for every Ubuntu release

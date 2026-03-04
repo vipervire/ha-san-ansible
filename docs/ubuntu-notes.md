@@ -85,17 +85,9 @@ auth sufficient pam_faillock.so authsucc
 4. Create a systemd unit (see the Debian package as a reference)
 5. Set `ha_cluster_monitoring_enabled: true` and re-run the monitoring play
 
-### Cockpit — 45Drives plugins are opt-in
+### Cockpit — 45Drives plugins
 
-45Drives Houston plugins (`cockpit-file-sharing`, `cockpit-identities`, `cockpit-navigator`) target Debian and CentOS. They are **skipped by default** on Ubuntu. Core cockpit packages from the Ubuntu repos are installed normally.
-
-To attempt 45Drives plugin installation on Ubuntu:
-```yaml
-# group_vars/storage_nodes/cluster.yml or host_vars/<node>.yml
-cockpit_45drives_enabled: true
-```
-
-This will add the 45Drives apt repository and attempt to install the plugins with `ignore_errors: true`.
+45Drives Houston plugins (`cockpit-file-sharing`, `cockpit-identities`, `cockpit-navigator`) are installed on Ubuntu using the dedicated Ubuntu enterprise repo at `https://repo.45drives.com/enterprise/ubuntu`, which hosts packages for `jammy` and `noble`. Installation uses `ignore_errors: true` in case a specific plugin is unavailable for the running release.
 
 ### python3-kasa — pip fallback on 22.04
 
@@ -140,7 +132,7 @@ All three nodes work with the same `site.yml` playbook — OS-specific handling 
 | OS | Version | ZFS | Sanoid | ha_cluster_exporter | 45Drives |
 |----|---------|-----|--------|--------------------|----|
 | Debian | 12 | DKMS | apt | apt | yes |
-| Ubuntu | 22.04 | native | manual | manual | opt-in |
-| Ubuntu | 24.04 | native | apt | manual | opt-in |
+| Ubuntu | 22.04 | native | manual | manual | yes |
+| Ubuntu | 24.04 | native | apt | manual | yes |
 | Rocky Linux | 9 | ELRepo RPM | apt (EPEL) | manual | no |
 | AlmaLinux | 9 | ELRepo RPM | apt (EPEL) | manual | no |
