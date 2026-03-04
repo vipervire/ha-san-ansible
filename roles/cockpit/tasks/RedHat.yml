@@ -7,15 +7,51 @@
     state: present
 
 # ─── 45Drives Houston plugins ─────────────────────────────────────────────
+- name: Download 45Drives GPG signing key (ASCII-armored)
+  ansible.builtin.get_url:
+    url: https://repo.45drives.com/key/gpg.asc
+    dest: /tmp/45drives-gpg.asc
+    mode: "0644"
+  register: key_download
+
+- name: Verify 45Drives GPG key fingerprint
+  # Guards against CDN compromise or DNS hijack substituting a malicious key.
+  # Fingerprint is pinned in group_vars/all.yml (fortyfive_drives_gpg_fingerprint).
+  ansible.builtin.shell:
+    cmd: >
+      gpg --with-fingerprint --with-colons /tmp/45drives-gpg.asc 2>/dev/null
+      | grep -i "{{ fortyfive_drives_gpg_fingerprint }}"
+  changed_when: false
+  when: key_download is succeeded
+
+- name: Install 45Drives GPG key to RPM key directory
+  ansible.builtin.copy:
+    src: /tmp/45drives-gpg.asc
+    dest: "{{ _45drives_keyring_path }}"
+    mode: "0644"
+    remote_src: true
+  when: key_download is changed
+
+- name: Import 45Drives GPG key into RPM keyring
+  ansible.builtin.command:
+    cmd: "rpm --import {{ _45drives_keyring_path }}"
+  when: key_download is changed
+
+- name: Remove temporary 45Drives GPG key file
+  ansible.builtin.file:
+    path: /tmp/45drives-gpg.asc
+    state: absent
+
 - name: Add 45Drives RPM repository
   ansible.builtin.yum_repository:
     name: 45drives
     description: 45Drives Repository
     baseurl: "{{ _45drives_repo_url }}"
     gpgcheck: true
-    gpgkey: https://repo.45drives.com/key/gpg
+    gpgkey: "file://{{ _45drives_keyring_path }}"
     enabled: true
   register: repo_add
+  when: key_download is succeeded
 
 - name: Install 45Drives Houston Cockpit plugins
   ansible.builtin.dnf:
