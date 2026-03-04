@@ -1,8 +1,19 @@
 ---
 # roles/iscsi-initiator/tasks/main.yml — Backend open-iscsi initiator (always running)
 
-- name: Load OS-specific variables
+- name: Load OS-family variables
   ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
+
+- name: Load distribution-specific variable overrides
+  ansible.builtin.include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+        - "{{ ansible_distribution }}.yml"
+      paths:
+        - "{{ role_path }}/vars"
+      skip: true
+  when: ansible_distribution != ansible_os_family
 
 - name: Install open-iscsi
   ansible.builtin.package:

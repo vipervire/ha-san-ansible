@@ -1,0 +1,19 @@
+---
+# OS-specific variable overrides for Ubuntu — ZFS role
+# Ubuntu ships ZFS natively in the 'universe' repo; no DKMS build or Debian contrib needed.
+
+_zfs_prereq_packages:
+  - "linux-headers-{{ ansible_kernel }}"
+
+_zfs_packages:
+  - zfsutils-linux
+  - zfs-zed
+
+_sanoid_packages:
+  - debhelper
+  - libcapture-tiny-perl
+  - libconfig-inifiles-perl
+  - pv
+  - lzop
+  - mbuffer
+  # sanoid itself is only available in Ubuntu 24.04+ universe; handled per-version in tasks

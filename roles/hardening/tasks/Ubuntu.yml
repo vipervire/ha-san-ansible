@@ -1,0 +1,23 @@
+---
+# roles/hardening/tasks/Ubuntu.yml — Ubuntu-specific package installation
+# Ubuntu ships ufw enabled by default; disable it so nftables can manage the firewall.
+
+- name: Install nftables
+  ansible.builtin.apt:
+    name: "{{ _hardening_packages.nftables }}"
+    state: present
+
+- name: Disable and mask ufw (Ubuntu default firewall — replaced by nftables)
+  ansible.builtin.systemd:
+    name: ufw
+    enabled: false
+    state: stopped
+    masked: true
+  failed_when: false
+
+- name: Disable firewalld if present
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: false
+    state: stopped
+  failed_when: false

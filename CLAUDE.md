@@ -4,7 +4,7 @@ This file contains guidelines and reminders for maintaining and extending this A
 
 ## What This Playbook Does
 
-This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI SAN** on Debian 12 or Rocky Linux 9. The architecture is:
+This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI SAN** on Debian 12, Ubuntu 22.04/24.04, Rocky Linux 9, or AlmaLinux 9. The architecture is:
 
 - **storage-a** and **storage-b**: Two symmetric storage nodes. Each exports its local disks via LIO iSCSI target to the peer, and connects to the peer's iSCSI target. A ZFS pool mirrors local physical disks with remote iSCSI disks. Either node can serve as active primary.
 - **quorum**: A lightweight third node that participates in Corosync/Pacemaker quorum voting only (no storage role).
@@ -44,7 +44,8 @@ This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI S
 │   ├── services/          # NFS, SMB, iSCSI client target; shared config dir on ZFS pool
 │   ├── monitoring/        # node_exporter, ha_cluster_exporter, ZFS scrub exporter, STONITH probe, reboot exporter
 │   └── cockpit/           # Cockpit + 45Drives Houston plugins
-│   # Each role follows the same pattern: tasks/{main,Debian,RedHat}.yml + vars/{Debian,RedHat}.yml
+│   # Each role follows the same pattern: tasks/{main,Debian,Ubuntu,RedHat}.yml + vars/{Debian,Ubuntu,RedHat}.yml
+│   # Ubuntu.yml overrides only values that differ from Debian.yml (loaded second, wins on conflict)
 └── docs/
     ├── cluster-monitoring.md      # ha_cluster_exporter, Prometheus scrape configs, key metrics
     ├── cockpit-ha-config.md       # Cockpit VIP + shared storage config sync (symlinks)
@@ -58,6 +59,7 @@ This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI S
     ├── stonith-migration.md       # Migrating from old global stonith_method to per-node dict
     ├── stonith-smart-plugs.md     # Smart plug fencing guide (Kasa, Tasmota, ESPHome, HTTP)
     ├── watchdog.md                # Hardware/software watchdog setup, module options, troubleshooting
+    ├── ubuntu-notes.md            # Ubuntu/AlmaLinux-specific notes: ufw, ZFS native, sanoid, ha_cluster_exporter
     ├── os-upgrade.md              # Rolling OS upgrade guide — dist-upgrade and full reinstall
     └── upgrade-procedure.md       # Manual upgrade reference (pre-dates os-upgrade.yml)
 ```
@@ -261,48 +263,58 @@ smart_monitoring_enabled: true        # toggles S.M.A.R.T disk health exporter
 - `services.yml`: NFS exports (`nfs_exports`), SMB shares (`smb_shares`)
 - `cluster.yml`: STONITH configuration (`stonith_nodes` dict), Pacemaker tuning, monitoring toggles
 
-### 6. Multi-OS Support (Debian 12 / Rocky Linux 9)
+### 6. Multi-OS Support (Debian 12 / Ubuntu 22.04/24.04 / Rocky Linux 9 / AlmaLinux 9)
 
-The playbook supports both **Debian 12** and **Rocky Linux 9** on all nodes. Each role uses OS-specific task files and variable files, dispatched via `ansible_os_family`:
+The playbook supports **Debian 12**, **Ubuntu 22.04/24.04**, **Rocky Linux 9**, and **AlmaLinux 9** on all nodes. Each role uses a two-layer dispatch:
+
+1. **OS-family vars** (`Debian.yml` / `RedHat.yml`) — base values for the whole family
+2. **Distribution overrides** (`Ubuntu.yml`, `Ubuntu-22.yml`) — only values that differ from the family base (loaded second, wins on conflict)
+3. **Task dispatch** uses `with_first_found`: `{{ ansible_distribution }}.yml` → `{{ ansible_os_family }}.yml` — roles without an `Ubuntu.yml` fall back to `Debian.yml` automatically
 
 **Role structure pattern:**
 ```
 roles/<role>/
 ├── tasks/
-│   ├── main.yml        # Loads OS vars, dispatches to OS-specific tasks, then shared tasks
+│   ├── main.yml        # Loads OS vars + overrides, dispatches to OS-specific tasks, then shared tasks
 │   ├── Debian.yml      # Debian-specific: apt packages, repos, service names
-│   └── RedHat.yml      # Rocky-specific: dnf packages, repos, service names
+│   ├── Ubuntu.yml      # Ubuntu overrides (only where Ubuntu differs from Debian)
+│   └── RedHat.yml      # Rocky/AlmaLinux: dnf packages, repos, service names
 ├── vars/
-│   ├── Debian.yml      # Debian package names, paths, service names
-│   └── RedHat.yml      # Rocky package names, paths, service names
+│   ├── Debian.yml          # Debian package names, paths, service names
+│   ├── Ubuntu.yml          # Ubuntu overrides (e.g. no zfs-dkms, empty ha_cluster_exporter_package)
+│   ├── Ubuntu-22.yml       # Ubuntu 22.04-only overrides (e.g. PAM faillock no-op)
+│   └── RedHat.yml          # Rocky/AlmaLinux package names, paths, service names
 ```
 
-**Key differences between Debian and Rocky:**
+**AlmaLinux 9:** Binary-compatible with Rocky Linux 9. Uses existing `RedHat.yml` files — no new files needed.
 
-| Area | Debian 12 | Rocky Linux 9 |
-|------|-----------|---------------|
-| Package manager | `apt` | `dnf` |
-| Auto-updates | `unattended-upgrades` | `dnf-automatic` |
-| PAM faillock | `pam-auth-update --enable faillock` | `authselect enable-feature with-faillock` |
-| ZFS source | `deb.debian.org` contrib | OpenZFS ELRepo RPM |
-| ZFS prerequisites | `linux-headers-*`, `dkms`, `dpkg-dev` | `kernel-devel-*`, `dkms` |
-| ZFS packages | `zfsutils-linux`, `zfs-dkms`, `zfs-zed` | `zfs`, `zfs-dkms` |
-| NFS server | `nfs-kernel-server` | `nfs-utils` |
-| NFS service name | `nfs-kernel-server` | `nfs-server` |
-| Samba services | `smbd`, `nmbd` | `smb`, `nmb` |
-| iSCSI target | `targetcli-fb`, `python3-rtslib-fb` | `targetcli`, `python3-rtslib` |
-| iSCSI target svc | `rtslib-fb-targetctl` | `target` |
-| iSCSI initiator | `open-iscsi` | `iscsi-initiator-utils` |
-| Chrony config | `/etc/chrony/chrony.conf` | `/etc/chrony.conf` |
-| Service env files | `/etc/default/<service>` | `/etc/sysconfig/<service>` |
-| Reboot check | `/var/run/reboot-required` | `needs-restarting -r` |
-| Firewall | nftables (native) | nftables (firewalld disabled) |
+**Ubuntu roles that fall back to Debian.yml (no Ubuntu.yml):**
+`iscsi-target`, `iscsi-initiator`, `services`, `networking` — packages are identical.
+
+**Key differences between supported OSes:**
+
+| Area | Debian 12 | Ubuntu 22.04/24.04 | Rocky / AlmaLinux 9 |
+|------|-----------|-------------------|---------------------|
+| Package manager | `apt` | `apt` | `dnf` |
+| Auto-updates | `unattended-upgrades` | `unattended-upgrades` | `dnf-automatic` |
+| Default firewall | nftables | **ufw** (masked by playbook) | nftables (firewalld disabled) |
+| PAM faillock | `pam-auth-update` | 22.04: no-op; 24.04: `pam-auth-update` | `authselect enable-feature` |
+| ZFS source | `deb.debian.org` contrib + DKMS | **universe** (native kernel module) | OpenZFS ELRepo RPM + DKMS |
+| ZFS packages | `zfsutils-linux`, `zfs-dkms`, `zfs-zed` | `zfsutils-linux`, `zfs-zed` (no DKMS) | `zfs`, `zfs-dkms` |
+| Sanoid | apt | 24.04: apt; **22.04: manual install** | EPEL |
+| ha_cluster_exporter | apt | **not in repos — manual install** | manual install |
+| 45Drives plugins | yes | opt-in (`cockpit_45drives_enabled: true`) | no |
+| python3-kasa | apt | 24.04: apt; 22.04: pip fallback | pip |
+| NTP servers | `*.debian.pool.ntp.org` | `ntp.ubuntu.com` | `*.rocky.pool.ntp.org` |
+| Chrony config | `/etc/chrony/chrony.conf` | `/etc/chrony/chrony.conf` | `/etc/chrony.conf` |
+| Reboot check | `/var/run/reboot-required` | `/var/run/reboot-required` | `needs-restarting -r` |
 
 **When adding new tasks:**
-- Use `ansible.builtin.package` for simple installs that share the same package name
-- Use OS-specific task files when package names differ or repos need adding
-- Always check both `vars/Debian.yml` and `vars/RedHat.yml` when adding packages
-- Templates that reference OS-specific paths should use variables from the vars files
+- Use `ansible.builtin.package` for simple installs that share the same package name across all distros
+- Use OS-specific task files when package names differ, repos need adding, or behaviour diverges
+- Always check `vars/Debian.yml`, `vars/Ubuntu.yml`, and `vars/RedHat.yml` when adding packages
+- Ubuntu overrides: only add values that **differ** from `Debian.yml` — do not duplicate
+- See `docs/ubuntu-notes.md` for Ubuntu/AlmaLinux-specific caveats and workarounds
 
 ### 7. ZFS Tunables
 
@@ -564,6 +576,7 @@ ssh storage-b 'zpool status san-pool'
 
 ## Change Log
 
+- **2026-03-04**: Added Ubuntu 22.04/24.04 and AlmaLinux 9 support — two-layer dispatch pattern (OS-family vars + distribution overrides), Ubuntu-specific files for ZFS (native modules, no DKMS), hardening (ufw disabled → nftables), monitoring (ha_cluster_exporter unavailable notice), pacemaker (kasa pip fallback), cockpit (45Drives opt-in); AlmaLinux uses existing RedHat.yml files unchanged; OS validation assertion added to site.yml; `docs/ubuntu-notes.md` added
 - **2026-03-04**: Added per-node watchdog overrides — any `watchdog_*` variable can be set in `host_vars/<node>.yml` to use a different module or settings per node (e.g. `iTCO_wdt` on storage-a, `softdog` on storage-b); added commented examples to `host_vars/storage-{a,b}.yml` and per-node configuration section in `docs/watchdog.md`
 - **2026-03-04**: Added watchdog support — kernel module loading (`watchdog_module`, defaults to `softdog`), boot persistence via `modules-load.d`, optional modprobe options via `watchdog-modprobe.conf.j2`, realtime daemon scheduling, and `docs/watchdog.md` covering hardware/software modules, STONITH relationship, verification, and troubleshooting
 - **2026-03-01**: Added Rocky Linux 9 support alongside Debian 12 — every role now dispatches to OS-specific task/vars files (`{Debian,RedHat}.yml`) via `ansible_os_family`, covering package management, repo setup, service names, PAM configuration, monitoring paths, and reboot-required detection

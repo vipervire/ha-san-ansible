@@ -1,11 +1,28 @@
 ---
 # roles/monitoring/tasks/main.yml — Prometheus exporters for HA SAN nodes
 
-- name: Load OS-specific variables
+- name: Load OS-family variables
   ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
+- name: Load distribution-specific variable overrides
+  ansible.builtin.include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+        - "{{ ansible_distribution }}.yml"
+      paths:
+        - "{{ role_path }}/vars"
+      skip: true
+  when: ansible_distribution != ansible_os_family
+
 - name: Include OS-specific monitoring package installation
-  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
+  ansible.builtin.include_tasks: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_distribution }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ role_path }}/tasks"
 
 # ─── Shared monitoring configuration (OS-independent) ───────────────────────
 
@@ -86,7 +103,9 @@
     src: ha-cluster-exporter-default.j2
     dest: "{{ _ha_cluster_exporter_env_file }}"
     mode: "0644"
-  when: ha_cluster_monitoring_enabled | default(true)
+  when:
+    - ha_cluster_monitoring_enabled | default(true)
+    - _ha_cluster_exporter_package | default('') | length > 0
   notify: restart ha_cluster_exporter
 
 - name: Enable and start ha_cluster_exporter service
@@ -94,7 +113,9 @@
     name: "{{ _ha_cluster_exporter_service }}"
     enabled: true
     state: started
-  when: ha_cluster_monitoring_enabled | default(true)
+  when:
+    - ha_cluster_monitoring_enabled | default(true)
+    - _ha_cluster_exporter_package | default('') | length > 0
 
 # ─── Alertmanager config generation (ntfy integration) ─────────────────────
 - name: Generate Alertmanager config for ntfy routing

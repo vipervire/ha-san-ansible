@@ -3,11 +3,28 @@
 # Dispatches to OS-specific task files for package installation,
 # then runs shared ZFS configuration tasks.
 
-- name: Load OS-specific variables
+- name: Load OS-family variables
   ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
 
+- name: Load distribution-specific variable overrides
+  ansible.builtin.include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+        - "{{ ansible_distribution }}.yml"
+      paths:
+        - "{{ role_path }}/vars"
+      skip: true
+  when: ansible_distribution != ansible_os_family
+
 - name: Include OS-specific ZFS installation tasks
-  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
+  ansible.builtin.include_tasks: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_distribution }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ role_path }}/tasks"
 
 # ─── Shared ZFS configuration (OS-independent) ──────────────────────────────
 
@@ -43,7 +60,13 @@
   when: sanoid_install | default(false)
   block:
     - name: Include OS-specific sanoid installation
-      ansible.builtin.include_tasks: "install_sanoid_{{ ansible_os_family }}.yml"
+      ansible.builtin.include_tasks: "{{ item }}"
+      with_first_found:
+        - files:
+            - "install_sanoid_{{ ansible_distribution }}.yml"
+            - "install_sanoid_{{ ansible_os_family }}.yml"
+          paths:
+            - "{{ role_path }}/tasks"
 
     - name: Deploy sanoid configuration
       ansible.builtin.template:

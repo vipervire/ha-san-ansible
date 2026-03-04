@@ -1,0 +1,53 @@
+---
+# roles/cockpit/tasks/Ubuntu.yml — Ubuntu-specific Cockpit installation
+# 45Drives Houston plugins target Debian/CentOS. Skip by default on Ubuntu.
+# Set cockpit_45drives_enabled: true to attempt the 45Drives repo anyway.
+
+- name: Install Cockpit
+  ansible.builtin.apt:
+    name: "{{ _cockpit_packages }}"
+    state: present
+
+# ─── 45Drives Houston plugins (opt-in on Ubuntu) ──────────────────────────
+- name: Note that 45Drives plugins are opt-in on Ubuntu
+  ansible.builtin.debug:
+    msg: >
+      45Drives Houston Cockpit plugins are not officially supported on Ubuntu.
+      Set cockpit_45drives_enabled: true in group_vars to attempt installation
+      from the 45Drives repository (may not have Ubuntu-compatible packages).
+  when: not (cockpit_45drives_enabled | default(false))
+
+- name: Add 45Drives GPG signing key (Ubuntu, opt-in)
+  ansible.builtin.get_url:
+    url: https://repo.45drives.com/key/gpg
+    dest: "{{ _45drives_keyring_path }}"
+    mode: "0644"
+    checksum: "{{ fortyfive_drives_gpg_checksum | default(omit) }}"
+  register: key_download
+  when: cockpit_45drives_enabled | default(false)
+
+- name: Add 45Drives apt repository (Ubuntu, opt-in)
+  ansible.builtin.apt_repository:
+    repo: "{{ _45drives_repo_url }}"
+    state: present
+    filename: 45drives
+  when:
+    - cockpit_45drives_enabled | default(false)
+    - key_download is succeeded
+
+- name: Update apt cache after adding 45Drives repo (Ubuntu)
+  ansible.builtin.apt:
+    update_cache: true
+  when:
+    - cockpit_45drives_enabled | default(false)
+    - key_download.changed | default(false)
+
+- name: Install 45Drives Houston Cockpit plugins (Ubuntu, opt-in)
+  ansible.builtin.apt:
+    name:
+      - cockpit-file-sharing
+      - cockpit-identities
+      - cockpit-navigator
+    state: present
+  ignore_errors: true  # repo may not have Ubuntu-compatible packages
+  when: cockpit_45drives_enabled | default(false)

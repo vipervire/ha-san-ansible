@@ -8,8 +8,19 @@
 # WARNING: Enabling networking_manage on a running system may disrupt connectivity.
 #          Set networking_restart_on_change: true only during initial deployment.
 
-- name: Load OS-specific variables
+- name: Load OS-family variables
   ansible.builtin.include_vars: "{{ ansible_os_family }}.yml"
+
+- name: Load distribution-specific variable overrides
+  ansible.builtin.include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+        - "{{ ansible_distribution }}.yml"
+      paths:
+        - "{{ role_path }}/vars"
+      skip: true
+  when: ansible_distribution != ansible_os_family
 
 # ─── TCP performance tuning (storage nodes) ───────────────────────────────
 - name: Deploy TCP tuning sysctl settings
@@ -31,7 +42,13 @@
 
 # ─── Interface configuration (opt-in) ─────────────────────────────────────
 - name: Include OS-specific network package installation
-  ansible.builtin.include_tasks: "{{ ansible_os_family }}.yml"
+  ansible.builtin.include_tasks: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_distribution }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ role_path }}/tasks"
 
 - name: Deploy management interface config
   ansible.builtin.template:

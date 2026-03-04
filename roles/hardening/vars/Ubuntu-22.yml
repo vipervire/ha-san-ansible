@@ -1,0 +1,6 @@
+---
+# OS-specific variable overrides for Ubuntu 22.04 — hardening role
+# pam-auth-update --enable faillock fails on Ubuntu 22.04 (no faillock PAM profile).
+# Use a safe no-op that succeeds silently so the task doesn't break the run.
+
+_pam_faillock_command: "pam-auth-update --enable faillock 2>/dev/null || true"

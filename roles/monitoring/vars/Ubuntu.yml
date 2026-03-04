@@ -1,0 +1,6 @@
+---
+# OS-specific variable overrides for Ubuntu — monitoring role
+# prometheus-hacluster-exporter is not in Ubuntu repos; set to empty to skip apt install.
+# Install manually from https://github.com/ClusterLabs/ha_cluster_exporter/releases
+
+_ha_cluster_exporter_package: ""
