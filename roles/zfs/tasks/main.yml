@@ -68,17 +68,24 @@
           paths:
             - "{{ role_path }}/tasks"
 
+    - name: Check if sanoid binary is present
+      ansible.builtin.stat:
+        path: /usr/sbin/sanoid
+      register: _sanoid_binary
+
     - name: Deploy sanoid configuration
       ansible.builtin.template:
         src: sanoid.conf.j2
         dest: /etc/sanoid/sanoid.conf
         mode: "0644"
+      when: _sanoid_binary.stat.exists
 
     - name: Enable sanoid timer
       ansible.builtin.systemd:
         name: sanoid.timer
         enabled: true
         state: started
+      when: _sanoid_binary.stat.exists
 
 # ─── ZFS Dataset Creation ──────────────────────────────────────────────────
 - name: Check if ZFS pool is imported
@@ -154,6 +161,12 @@
   when: zed_ntfy_enabled | default(false)
 
 # ─── Syncoid offsite replication (optional) ────────────────────────────────
+- name: Check if syncoid binary is present
+  ansible.builtin.stat:
+    path: /usr/sbin/syncoid
+  register: _syncoid_binary
+  when: syncoid_enabled | default(false)
+
 - name: Deploy syncoid replication systemd service
   ansible.builtin.template:
     src: syncoid.service.j2
@@ -161,7 +174,7 @@
     mode: "0644"
   when:
     - syncoid_enabled | default(false)
-    - sanoid_install | default(false)
+    - _syncoid_binary.stat.exists | default(false)
   notify: reload systemd
 
 - name: Deploy syncoid replication systemd timer
@@ -171,7 +184,7 @@
     mode: "0644"
   when:
     - syncoid_enabled | default(false)
-    - sanoid_install | default(false)
+    - _syncoid_binary.stat.exists | default(false)
   notify: reload systemd
 
 - name: Enable syncoid replication timer
@@ -182,4 +195,4 @@
     daemon_reload: true
   when:
     - syncoid_enabled | default(false)
-    - sanoid_install | default(false)
+    - _syncoid_binary.stat.exists | default(false)
