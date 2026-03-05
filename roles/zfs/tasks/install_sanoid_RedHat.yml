@@ -1,7 +1,0 @@
----
-# roles/zfs/tasks/install_sanoid_RedHat.yml — Rocky Linux-specific Sanoid installation
-
-- name: Install sanoid dependencies and sanoid
-  ansible.builtin.dnf:
-    name: "{{ _sanoid_packages }}"
-    state: present

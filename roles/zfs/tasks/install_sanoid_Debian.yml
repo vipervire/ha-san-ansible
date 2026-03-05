@@ -1,7 +1,0 @@
----
-# roles/zfs/tasks/install_sanoid_Debian.yml — Debian-specific Sanoid installation
-
-- name: Install sanoid dependencies
-  ansible.builtin.apt:
-    name: "{{ _sanoid_packages }}"
-    state: present

@@ -56,18 +56,9 @@
     - zfs-zed
     - zfs.target
 
-- name: Install sanoid for automated snapshots
+- name: Configure sanoid for automated snapshots
   when: sanoid_install | default(false)
   block:
-    - name: Include OS-specific sanoid installation
-      ansible.builtin.include_tasks: "{{ item }}"
-      with_first_found:
-        - files:
-            - "install_sanoid_{{ ansible_distribution }}.yml"
-            - "install_sanoid_{{ ansible_os_family }}.yml"
-          paths:
-            - "{{ role_path }}/tasks"
-
     - name: Check if sanoid binary is present
       ansible.builtin.stat:
         path: /usr/sbin/sanoid
