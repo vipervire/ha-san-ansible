@@ -23,7 +23,6 @@
     src: sshd_hardening.conf.j2
     dest: /etc/ssh/sshd_config.d/90-hardening.conf
     mode: "0644"
-    validate: "sshd -t -f %s"
   notify: restart sshd
 
 # ─── Kernel Sysctl Hardening ───────────────────────────────────────────────

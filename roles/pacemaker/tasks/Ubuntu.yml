@@ -25,4 +25,4 @@
     stonith_nodes is defined and
     stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0 and
     kasa_apt_result is defined and
-    kasa_apt_result.rc | default(0) != 0
+    kasa_apt_result is failed

@@ -17,7 +17,9 @@
   ansible.builtin.apt:
     name: "{{ _smartmontools_package }}"
     state: present
-  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
+  when:
+    - smart_monitoring_enabled | default(true)
+    - inventory_hostname in groups['storage_nodes']
 
 - name: Note that ha_cluster_exporter is unavailable on Ubuntu
   ansible.builtin.debug:

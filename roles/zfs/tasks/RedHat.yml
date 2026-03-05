@@ -12,7 +12,7 @@
     state: present
     disable_gpg_check: true
   register: zfs_repo_install
-  failed_when: zfs_repo_install.rc != 0 and 'already installed' not in (zfs_repo_install.msg | default(''))
+  failed_when: zfs_repo_install is failed and 'already installed' not in (zfs_repo_install.msg | default(''))
 
 - name: Install ZFS prerequisites
   ansible.builtin.dnf:

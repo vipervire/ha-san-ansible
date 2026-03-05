@@ -70,8 +70,8 @@ pcs stonith create fence-{{ node_name }} fence_http \
 echo "Creating HTTP fence agent for {{ node_name }}"
 pcs stonith create fence-{{ node_name }} fence_http \
   ip="{{ node_cfg.ip }}" \
-  username="{{ node_cfg.user }}" \
-  password="{{ node_cfg.password }}" \
+  username="{{ node_cfg.user | default('') }}" \
+  password="{{ node_cfg.password | default('') }}" \
   power_off_url="{{ node_cfg.power_off_url }}" \
   power_on_url="{{ node_cfg.power_on_url }}" \
   status_url="{{ node_cfg.status_url }}" \

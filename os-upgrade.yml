@@ -153,16 +153,16 @@
           ═══════════════════════════════════════════════════════════
           PRE-UPGRADE SUMMARY for {{ inventory_hostname }}
           ═══════════════════════════════════════════════════════════
-          {% if _is_active_storage %}
+          {% if _is_active_storage | bool %}
           Role: ACTIVE storage node (ZFS pool running on THIS node)
           Impact: Upgrading will trigger a PLANNED FAILOVER.
                   Resources will migrate to the peer storage node.
                   Clients will experience a brief interruption (~5-10s).
-          {% elif _is_standby_storage %}
+          {% elif _is_standby_storage | bool %}
           Role: STANDBY storage node (ZFS pool on {{ _zfs_active_node | default('unknown') }})
           Impact: Putting this node in standby degrades the ZFS mirror.
                   Clients are UNAFFECTED. Pool resilvering begins on rejoin.
-          {% elif _is_quorum_node %}
+          {% elif _is_quorum_node | bool %}
           Role: QUORUM node (no storage role)
           Impact: Temporarily reduces cluster votes to 2/3 during upgrade.
                   Cluster retains quorum. No storage impact.

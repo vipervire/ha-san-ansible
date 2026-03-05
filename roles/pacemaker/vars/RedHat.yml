@@ -5,8 +5,6 @@ _pacemaker_packages:
   - pacemaker
   - corosync
   - pcs
-  - crmsh
   - fence-agents-all
 
-_pacemaker_kasa_packages:
-  - python3-kasa
+_pacemaker_kasa_packages: []

@@ -31,6 +31,7 @@ _common_remove_packages:
   - bluetooth
   - modemmanager
 
+_chrony_service_name: chrony
 _chrony_config_path: /etc/chrony/chrony.conf
 
 _default_ntp_servers:
