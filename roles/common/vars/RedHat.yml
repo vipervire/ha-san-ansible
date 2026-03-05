@@ -25,6 +25,7 @@ _common_remove_packages:
   - bluez
   - ModemManager
 
+_chrony_service_name: chronyd
 _chrony_config_path: /etc/chrony.conf
 
 _default_ntp_servers:

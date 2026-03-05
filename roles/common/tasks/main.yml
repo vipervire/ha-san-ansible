@@ -37,7 +37,7 @@
 
 - name: Ensure chrony is enabled
   ansible.builtin.systemd:
-    name: chronyd
+    name: "{{ _chrony_service_name }}"
     enabled: true
     state: started
 

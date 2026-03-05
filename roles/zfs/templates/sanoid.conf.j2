@@ -14,7 +14,7 @@
   hourly = {{ tmpl.hourly }}
   daily = {{ tmpl.daily }}
   monthly = {{ tmpl.monthly }}
-  yearly = {{ tmpl.yearly }}
+  yearly = {{ tmpl.yearly | default(0) }}
   autosnap = {{ 'yes' if tmpl.autosnap else 'no' }}
   autoprune = {{ 'yes' if tmpl.autoprune else 'no' }}
 

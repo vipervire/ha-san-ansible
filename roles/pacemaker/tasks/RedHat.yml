@@ -7,10 +7,11 @@
     state: present
     enablerepo: highavailability
 
-- name: Install TP-Link Kasa fence agent dependencies
-  ansible.builtin.dnf:
-    name: "{{ _pacemaker_kasa_packages }}"
+- name: Install python-kasa via pip (not available in RHEL/Rocky repos)
+  ansible.builtin.pip:
+    name: python-kasa
     state: present
+    executable: pip3
   when: >
     stonith_nodes is defined and
     stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0

@@ -38,7 +38,7 @@
     persistent: present
   when: >
     tcp_tunables is defined and
-    tcp_tunables.get('net.ipv4.tcp_congestion_control', '') == 'bbr'
+    (tcp_tunables['net.ipv4.tcp_congestion_control'] | default('')) == 'bbr'
 
 # ─── Interface configuration (opt-in) ─────────────────────────────────────
 - name: Include OS-specific network package installation

@@ -125,7 +125,7 @@ all:
             storage-b:
               ansible_host: 10.20.20.2
               # Ubuntu 24.04 node
-        quorum_nodes:
+        quorum_node:
           hosts:
             quorum:
               ansible_host: 10.20.20.3

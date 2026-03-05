@@ -16,7 +16,9 @@
   ansible.builtin.dnf:
     name: "{{ _smartmontools_package }}"
     state: present
-  when: smart_monitoring_enabled | default(true) and inventory_hostname in groups['storage_nodes']
+  when:
+    - smart_monitoring_enabled | default(true)
+    - inventory_hostname in groups['storage_nodes']
 
 - name: Install prometheus-hacluster-exporter
   ansible.builtin.dnf:
