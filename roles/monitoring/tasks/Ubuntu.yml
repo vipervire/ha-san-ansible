@@ -21,6 +21,12 @@
     - smart_monitoring_enabled | default(true)
     - inventory_hostname in groups['storage_nodes']
 
+- name: Install ethtool (for SFP/QSFP transceiver temperatures)
+  ansible.builtin.apt:
+    name: ethtool
+    state: present
+  when: hwtemp_monitoring_enabled | default(true)
+
 - name: Note that ha_cluster_exporter is unavailable on Ubuntu
   ansible.builtin.debug:
     msg: >

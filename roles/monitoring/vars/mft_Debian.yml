@@ -1,0 +1,11 @@
+---
+# roles/monitoring/vars/mft_Debian.yml — Mellanox MFT repo config for Debian
+
+_mft_repo_url: >-
+  deb [arch=amd64 signed-by=/usr/share/keyrings/mellanox-archive-keyring.gpg]
+  https://linux.mellanox.com/public/repo/mlnx_ofed/latest/{{ _mft_os_path }}/amd64 ./
+_mft_keyring_path: /usr/share/keyrings/mellanox-archive-keyring.gpg
+_mft_os_path: "debian{{ ansible_distribution_version }}"
+_mft_packages:
+  - mft
+  - kernel-mft-dkms

@@ -67,6 +67,23 @@
     enabled: true
     state: started
 
+# ─── Mellanox MFT (optional, for ConnectX-3 NIC chip temperature) ──────────
+- name: Load MFT OS-family vars
+  ansible.builtin.include_vars: "mft_{{ ansible_os_family }}.yml"
+  when: mellanox_mft_install | default(false)
+
+- name: Load MFT distribution overrides
+  ansible.builtin.include_vars: "mft_{{ ansible_distribution }}.yml"
+  when: mellanox_mft_install | default(false)
+  failed_when: false  # Ubuntu overlay may not exist — mft_Debian.yml already handles it
+
+- name: Install Mellanox Firmware Tools
+  ansible.builtin.include_tasks: "{{ item }}"
+  with_first_found:
+    - "mft_{{ ansible_distribution }}.yml"
+    - "mft_{{ ansible_os_family }}.yml"
+  when: mellanox_mft_install | default(false)
+
 # ─── Script-based timer exporters ─────────────────────────────────────────
 - name: Deploy timer-based exporters
   ansible.builtin.include_tasks: deploy_timer_exporter.yml
@@ -85,6 +102,9 @@
       storage_only: true
     - name: ras-exporter
       enabled: "{{ ras_monitoring_enabled | default(false) }}"
+      storage_only: false
+    - name: hwtemp-exporter
+      enabled: "{{ hwtemp_monitoring_enabled | default(true) }}"
       storage_only: false
   loop_control:
     loop_var: exporter
