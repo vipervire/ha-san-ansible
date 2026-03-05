@@ -23,3 +23,9 @@
   ansible.builtin.dnf:
     name: "{{ _zfs_packages }}"
     state: present
+
+- name: Install sanoid
+  ansible.builtin.dnf:
+    name: "{{ _sanoid_packages }}"
+    state: present
+  when: sanoid_install | default(false)

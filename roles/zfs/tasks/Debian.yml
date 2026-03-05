@@ -17,3 +17,9 @@
     name: "{{ _zfs_packages }}"
     state: present
     update_cache: true
+
+- name: Install sanoid
+  ansible.builtin.apt:
+    name: "{{ _sanoid_packages }}"
+    state: present
+  when: sanoid_install | default(false)
