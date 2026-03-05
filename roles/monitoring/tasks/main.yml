@@ -78,8 +78,10 @@
   failed_when: false  # Ubuntu overlay may not exist — mft_Debian.yml already handles it
 
 - name: Install Mellanox Firmware Tools
-  ansible.builtin.include_tasks:
-    file: "mft_{{ ansible_distribution }}.yml"
+  ansible.builtin.include_tasks: "{{ item }}"
+  with_first_found:
+    - "mft_{{ ansible_distribution }}.yml"
+    - "mft_{{ ansible_os_family }}.yml"
   when: mellanox_mft_install | default(false)
 
 # ─── Script-based timer exporters ─────────────────────────────────────────
