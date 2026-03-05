@@ -6,5 +6,3 @@ _pacemaker_packages:
   - corosync
   - pcs
   - fence-agents-all
-
-_pacemaker_kasa_packages: []
