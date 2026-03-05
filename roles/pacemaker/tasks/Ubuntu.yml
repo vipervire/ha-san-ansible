@@ -11,7 +11,7 @@
     name: "{{ _pacemaker_kasa_packages }}"
     state: present
   register: kasa_apt_result
-  failed_when: false
+  ignore_errors: true
   when: >
     stonith_nodes is defined and
     stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0
