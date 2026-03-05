@@ -56,7 +56,6 @@ This is an **Ansible playbook for deploying a high-availability ZFS-over-iSCSI S
     ├── ntfy-integration.md        # Prometheus Alertmanager → NTFY push notifications
     ├── prometheus-alerts.yml      # Alert rule examples
     ├── prometheus-recording-rules.yml  # Recording rules for aggregation
-    ├── stonith-migration.md       # Migrating from old global stonith_method to per-node dict
     ├── stonith-smart-plugs.md     # Smart plug fencing guide (Kasa, Tasmota, ESPHome, HTTP)
     ├── watchdog.md                # Hardware/software watchdog setup, module options, troubleshooting
     ├── ubuntu-notes.md            # Ubuntu/AlmaLinux-specific notes: ufw, ZFS native, sanoid, ha_cluster_exporter
@@ -168,7 +167,7 @@ stonith_nodes:
     # No credentials needed for Kasa local protocol
 ```
 
-`python3-kasa` is installed automatically if any node uses method `kasa`. See `docs/stonith-smart-plugs.md` for all plug types and `docs/stonith-migration.md` for migrating from the old `stonith_method` global variable.
+`python3-kasa` is installed automatically if any node uses method `kasa`. See `docs/stonith-smart-plugs.md` for all plug types and options.
 
 **Post-fence verification** is enabled by default (`stonith_fence_verify: true`). After the primary fence agent runs, a custom `fence_check` agent queries the STONITH device power state and pings the target on all three VLANs. If either check fails, Pacemaker considers fencing incomplete and **blocks failover** to prevent split-brain. Both agents are placed in **fencing level 1** — all must succeed for fencing to complete:
 
@@ -581,7 +580,7 @@ ssh storage-b 'zpool status san-pool'
 - **2026-03-04**: Added watchdog support — kernel module loading (`watchdog_module`, defaults to `softdog`), boot persistence via `modules-load.d`, optional modprobe options via `watchdog-modprobe.conf.j2`, realtime daemon scheduling, and `docs/watchdog.md` covering hardware/software modules, STONITH relationship, verification, and troubleshooting
 - **2026-03-01**: Added Rocky Linux 9 support alongside Debian 12 — every role now dispatches to OS-specific task/vars files (`{Debian,RedHat}.yml`) via `ansible_os_family`, covering package management, repo setup, service names, PAM configuration, monitoring paths, and reboot-required detection
 - **2026-02-23**: Added `os-upgrade.yml` rolling upgrade playbook and `docs/os-upgrade.md` — automates pre-upgrade health checks, standby/failover, iSCSI verification, and post-upgrade rejoin
-- **2026-02-20**: Comprehensive CLAUDE.md update — added architecture overview, playbook tags, new monitoring exporters (stonith-probe, reboot-required-exporter), ZFS tunable notes, Sanoid snapshot policy, complete firewall port table, NFS security doc, dataset best practices doc, HTML design/ops docs, stonith-migration doc, full deployment workflow
+- **2026-02-20**: Comprehensive CLAUDE.md update — added architecture overview, playbook tags, new monitoring exporters (stonith-probe, reboot-required-exporter), ZFS tunable notes, Sanoid snapshot policy, complete firewall port table, NFS security doc, dataset best practices doc, HTML design/ops docs, full deployment workflow
 - **2025-02-16**: Added Cockpit HA configuration (VIP + shared storage config sync)
 - **2025-02-16**: Added mixed STONITH configuration support (per-node methods)
 - **2025-02-16**: Added comprehensive monitoring (ZFS scrubs, cluster health)
