@@ -8,7 +8,6 @@
 # ---------------------------------------------------------------------------
 # Supported methods: ipmi, kasa, tasmota, esphome, http
 # See docs/stonith-smart-plugs.md for setup guides per method.
-# See docs/stonith-migration.md for upgrading from the old global stonith_method variable.
 #
 # FENCING LATENCY vs. ZFS MULTIHOST:
 #   On unplanned node failure, Pacemaker must successfully fence the dead node

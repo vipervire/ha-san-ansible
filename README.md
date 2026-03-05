@@ -4,11 +4,11 @@ Two-node active/passive storage cluster with quorum, deploying:
 - ZFS mirroring over iSCSI for cross-node redundancy
 - Pacemaker/Corosync with aggressive-safe failover (~10-12s unplanned, ~5-8s planned)
 - Floating VIPs for NFS, SMB, and iSCSI client services
-- STONITH fencing (IPMI or smart plug)
+- STONITH fencing (IPMI, Kasa, Tasmota, ESPHome, HTTP)
 - Security hardening (nftables, SSH, sysctl)
 - 45Drives Houston Cockpit plugins for web management
 - Sanoid automated snapshots
-- Prometheus node_exporter for monitoring
+- Prometheus monitoring (node, ZFS, cluster, STONITH exporters)
 
 ## Architecture
 
@@ -32,7 +32,7 @@ Two-node active/passive storage cluster with quorum, deploying:
 
 ## Prerequisites
 
-1. **Three hosts** running Debian 12 or Rocky Linux 9 minimal (fresh install)
+1. **Three hosts** running Debian 12, Ubuntu 22.04/24.04, Rocky Linux 9, or AlmaLinux 9 minimal (fresh install)
 2. **SSH key access** as `storageadmin` with passwordless sudo
 3. **Network connectivity** on management VLAN between all nodes
 4. **Ansible 2.14+** on your control machine
@@ -48,11 +48,12 @@ ansible-galaxy collection install community.general
 ```bash
 # 1. Clone/copy this directory
 # 2. Edit inventory and variables:
-vim inventory.yml          # Set hostnames and IPs
-vim group_vars/all.yml     # Cluster name, VLANs, VIPs, SSH key
-vim group_vars/storage_nodes.yml  # STONITH, CHAP credentials
-vim host_vars/storage-a.yml      # Disk devices, IPs
-vim host_vars/storage-b.yml      # Disk devices, IPs
+vim inventory.yml                          # Set hostnames and IPs
+vim group_vars/all.yml                     # Cluster name, VLANs, VIPs, SSH key
+vim group_vars/storage_nodes/cluster.yml   # STONITH config
+vim group_vars/storage_nodes/iscsi.yml     # CHAP credentials
+vim host_vars/storage-a.yml               # Disk devices, IPs
+vim host_vars/storage-b.yml               # Disk devices, IPs
 
 # 3. Vault your secrets (recommended)
 ansible-vault encrypt_string 'your-password' --name 'hacluster_password'
@@ -105,7 +106,7 @@ ansible-playbook -i inventory.yml site.yml --tags storage    # ZFS + iSCSI
 ansible-playbook -i inventory.yml site.yml --tags cluster    # Pacemaker
 ansible-playbook -i inventory.yml site.yml --tags services   # NFS/SMB configs
 ansible-playbook -i inventory.yml site.yml --tags cockpit    # Houston UI
-ansible-playbook -i inventory.yml site.yml --tags monitoring # node_exporter
+ansible-playbook -i inventory.yml site.yml --tags monitoring # monitoring exporters
 ```
 
 ## Directory Structure
@@ -114,24 +115,31 @@ ansible-playbook -i inventory.yml site.yml --tags monitoring # node_exporter
 ha-san-ansible/
 ├── site.yml                    # Main playbook
 ├── os-upgrade.yml              # Rolling OS upgrade helper (always use --limit)
+├── verify.yml                  # Post-deployment verification
 ├── inventory.yml               # Host inventory
 ├── group_vars/
 │   ├── all.yml                 # Cluster-wide variables
-│   └── storage_nodes.yml       # Storage-specific variables
+│   └── storage_nodes/
+│       ├── cluster.yml         # STONITH config, Pacemaker tuning
+│       ├── iscsi.yml           # iSCSI CHAP credentials, queue depth
+│       ├── network.yml         # Interface names, TCP tuning
+│       ├── services.yml        # NFS exports, SMB shares
+│       └── zfs.yml             # ZFS pool, datasets, scrub, Sanoid
 ├── host_vars/
-│   ├── storage-a.yml           # Node A disks, IPs
-│   ├── storage-b.yml           # Node B disks, IPs
+│   ├── storage-a.yml           # Node A disks, IPs, IQNs
+│   ├── storage-b.yml           # Node B disks, IPs, IQNs
 │   └── quorum.yml              # Quorum node config
 └── roles/
     ├── common/                 # Base packages, NTP, /etc/hosts
-    ├── hardening/              # SSH, nftables, sysctl
-    ├── zfs/                    # ZFS install, tunables, sanoid
+    ├── hardening/              # SSH, nftables, sysctl, PAM
+    ├── zfs/                    # ZFS install, tunables, Sanoid
     ├── iscsi-target/           # LIO targetcli setup
     ├── iscsi-initiator/        # open-iscsi + pool creation helper
     ├── pacemaker/              # Corosync + Pacemaker cluster
-    ├── services/               # NFS, SMB config files
+    ├── services/               # NFS, SMB, iSCSI client config
     ├── cockpit/                # Cockpit + 45Drives Houston
-    └── monitoring/             # Prometheus node_exporter
+    ├── monitoring/             # Monitoring exporters (node, ZFS, cluster, STONITH)
+    └── networking/             # Interface/VLAN config (opt-in)
 ```
 
 ## Post-Deployment Testing
@@ -191,12 +199,11 @@ Access Cockpit at:
 
 - **Disk layout**: Edit `local_data_disks` in `host_vars/` for your drives
 - **VLANs/subnets**: Edit `vlans` dict in `group_vars/all.yml`
-- **STONITH method**: Configure per-node in `stonith_nodes` dict in `storage_nodes.yml`
+- **STONITH method**: Configure per-node in `stonith_nodes` dict in `group_vars/storage_nodes/cluster.yml`
   - Supports mixed methods: storage-a can use IPMI while storage-b uses smart plug
   - Smart plug guide: `docs/stonith-smart-plugs.md` (TP-Link Kasa, ESPHome, Tasmota)
-  - Migration guide: `docs/stonith-migration.md` (upgrading from old config format)
-- **Snapshot policy**: Edit `sanoid_templates` in `storage_nodes.yml`
-- **ZFS scrub schedule**: Edit `zfs_scrub_schedule` in `storage_nodes.yml` (default: monthly on 1st at 2 AM)
+- **Snapshot policy**: Edit `sanoid_templates` in `group_vars/storage_nodes/zfs.yml`
+- **ZFS scrub schedule**: Edit `zfs_scrub_schedule` in `group_vars/storage_nodes/zfs.yml` (default: monthly on 1st at 2 AM)
   - Use systemd OnCalendar syntax: `"*-*-01 02:00:00"` = 1st of month at 2am
   - Disable with `zfs_scrub_enabled: false`
   - Monitoring: See `docs/ntfy-integration.md` for Prometheus + NTFY alerting setup
@@ -241,6 +248,12 @@ This playbook deploys comprehensive monitoring for both storage and cluster heal
 **Documentation**:
 - Cluster monitoring guide: `docs/cluster-monitoring.md`
 - STONITH smart plug setup: `docs/stonith-smart-plugs.md`
+- Hardware/software watchdog: `docs/watchdog.md`
+- Ubuntu/AlmaLinux-specific notes: `docs/ubuntu-notes.md`
+- Rolling OS upgrade guide: `docs/os-upgrade.md`
+- iSCSI path recovery: `docs/iscsi-recovery.md`
+- NFS client configuration: `docs/nfs-client-config.md`
+- Cockpit HA configuration: `docs/cockpit-ha-config.md`
 - Example Prometheus alert rules: `docs/prometheus-alerts.yml`
 - Prometheus recording rules: `docs/prometheus-recording-rules.yml`
 - NTFY integration + dead-man's switch: `docs/ntfy-integration.md`

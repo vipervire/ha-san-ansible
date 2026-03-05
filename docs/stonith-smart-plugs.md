@@ -23,7 +23,7 @@ The playbook now supports **mixed fencing methods** where different nodes can us
 ### Configuration Example
 
 ```yaml
-# In group_vars/storage_nodes.yml
+# In group_vars/storage_nodes/cluster.yml
 stonith_nodes:
   storage-a:
     method: "ipmi"           # Enterprise server with BMC
@@ -45,8 +45,6 @@ The playbook will automatically:
 - Both IPMI: Set both nodes to `method: "ipmi"`
 - Both smart plugs: Mix `kasa`, `esphome`, `tasmota` as needed
 - Three nodes: Add third node with any method
-
-See `docs/stonith-migration.md` for migrating from the old configuration format.
 
 ## Recommended Options
 
@@ -116,20 +114,17 @@ kasa --host 10.20.20.201 --type plug off
 
 ### 2. Update Ansible Variables
 
-**Edit `group_vars/storage_nodes.yml`:**
+**Edit `group_vars/storage_nodes/cluster.yml`:**
 
 ```yaml
-# Option B: TP-Link Kasa smart plugs
-stonith_method: "smart_plug"
-stonith_smart_plug_type: "kasa"  # kasa, tasmota, or http
-stonith_smart_plug:
+stonith_nodes:
   storage-a:
+    method: "kasa"
     ip: "10.20.20.201"   # Kasa plug controlling storage-a
   storage-b:
+    method: "kasa"
     ip: "10.20.20.202"   # Kasa plug controlling storage-b
 ```
-
-Comment out the IPMI section if it was previously configured.
 
 ### 3. Install fence_kasa Agent
 
@@ -171,14 +166,14 @@ Add to `roles/pacemaker/tasks/main.yml` after the package installation:
     mode: '0755'
     owner: root
     group: root
-  when: stonith_method == 'smart_plug' and stonith_smart_plug_type == 'kasa'
+  when: stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0
 
 - name: Create fence_kasa metadata link
   ansible.builtin.file:
     src: /usr/sbin/fence_kasa
     dest: /usr/lib/stonith/plugins/external/kasa
     state: link
-  when: stonith_method == 'smart_plug' and stonith_smart_plug_type == 'kasa'
+  when: stonith_nodes.values() | selectattr('method', 'equalto', 'kasa') | list | length > 0
 ```
 
 ### 4. Run Ansible Playbook
@@ -257,14 +252,14 @@ If you prefer open-source firmware, both Tasmota and ESPHome are excellent optio
 
 **Ansible Configuration:**
 ```yaml
-stonith_method: "smart_plug"
-stonith_smart_plug_type: "tasmota"
-stonith_smart_plug:
+stonith_nodes:
   storage-a:
+    method: "tasmota"
     ip: "10.20.20.201"
     user: "admin"              # optional if password set
     password: "your-password"   # optional if password set
   storage-b:
+    method: "tasmota"
     ip: "10.20.20.202"
     user: "admin"
     password: "your-password"
@@ -341,15 +336,15 @@ switch:
 
 **Ansible Configuration:**
 ```yaml
-stonith_method: "smart_plug"
-stonith_smart_plug_type: "esphome"
-stonith_smart_plug:
+stonith_nodes:
   storage-a:
+    method: "esphome"
     ip: "10.20.20.201"
     switch_name: "relay"        # Must match ESPHome switch ID
     user: "admin"               # optional if web auth disabled
     password: "your-password"    # optional if web auth disabled
   storage-b:
+    method: "esphome"
     ip: "10.20.20.202"
     switch_name: "relay"
     user: "admin"
@@ -496,7 +491,7 @@ The `fence_check` agent:
 Enabled by default (`stonith_fence_verify: true` in `roles/pacemaker/defaults/main.yml`). To disable:
 
 ```yaml
-# group_vars/storage_nodes.yml
+# group_vars/storage_nodes/cluster.yml
 stonith_fence_verify: false
 ```
 

@@ -5,7 +5,7 @@
 iscsi_chap_enabled: true
 iscsi_mutual_chap_enabled: true
 
-# Credentials — set in group_vars/storage_nodes.yml (vault in production)
+# Credentials — set in group_vars/storage_nodes/iscsi.yml (vault in production)
 # iscsi_chap_user: ""
 # iscsi_chap_password: ""
 # iscsi_mutual_chap_user: ""
