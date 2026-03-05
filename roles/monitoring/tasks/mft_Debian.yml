@@ -1,0 +1,52 @@
+---
+# roles/monitoring/tasks/mft_Debian.yml — Mellanox MFT installation for Debian/Ubuntu
+
+- name: Download Mellanox GPG signing key (ASCII-armored)
+  ansible.builtin.get_url:
+    url: https://www.mellanox.com/downloads/ofed/RPM-GPG-KEY-Mellanox
+    dest: /tmp/mellanox-gpg.asc
+    mode: "0644"
+  register: _mft_key_download
+
+- name: Verify Mellanox GPG key fingerprint
+  # Guards against CDN compromise or DNS hijack substituting a malicious key.
+  # Fingerprint is pinned in group_vars/all.yml (mellanox_gpg_fingerprint).
+  ansible.builtin.shell:
+    cmd: >
+      gpg --with-fingerprint --with-colons /tmp/mellanox-gpg.asc 2>/dev/null
+      | grep -i "{{ mellanox_gpg_fingerprint }}"
+  changed_when: false
+  when: _mft_key_download is succeeded
+
+- name: Dearmor Mellanox GPG signing key into keyring
+  ansible.builtin.command:
+    cmd: "gpg --batch --yes --dearmor -o {{ _mft_keyring_path }} /tmp/mellanox-gpg.asc"
+  when: _mft_key_download is changed
+
+- name: Remove temporary Mellanox GPG key file
+  ansible.builtin.file:
+    path: /tmp/mellanox-gpg.asc
+    state: absent
+
+- name: Add Mellanox MLNX_OFED apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ _mft_repo_url }}"
+    state: present
+    filename: mellanox-mft
+  when: _mft_key_download is succeeded
+
+- name: Update apt cache after adding Mellanox repo
+  ansible.builtin.apt:
+    update_cache: true
+  when: _mft_key_download is changed
+
+- name: Install Mellanox Firmware Tools packages
+  ansible.builtin.apt:
+    name: "{{ _mft_packages }}"
+    state: present
+
+- name: Enable and start mst service
+  ansible.builtin.systemd:
+    name: mst
+    state: started
+    enabled: true

@@ -1,0 +1,11 @@
+# Managed by Ansible — NIC/HBA/SFP temperature metrics exporter timer
+[Unit]
+Description=Run NIC/HBA/SFP temperature metrics exporter every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,6 @@
+---
+# roles/monitoring/tasks/mft_Ubuntu.yml — Mellanox MFT installation for Ubuntu
+# Ubuntu uses the same apt-based flow as Debian; delegate to mft_Debian.yml.
+
+- name: Install Mellanox MFT on Ubuntu (apt-based, same as Debian)
+  ansible.builtin.include_tasks: mft_Debian.yml
