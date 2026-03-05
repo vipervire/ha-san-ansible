@@ -114,37 +114,6 @@ curl http://10.20.20.1:9664/metrics | grep ha_cluster
 
 ---
 
-## Documentation
-
-### Operations
-
-- [Operations Runbook](ha-san-ops.html) — day-to-day procedures, failover, recovery
-- [Architecture Overview](ha-san-design.html) — design rationale and component diagram
-- [Rolling OS Upgrade](os-upgrade.md) — safe upgrade procedure using `os-upgrade.yml`
-- [iSCSI Path Recovery](iscsi-recovery.md) — recovering lost iSCSI sessions
-- [Ubuntu / AlmaLinux Notes](ubuntu-notes.md) — OS-specific differences and workarounds
-
-### Storage
-
-- [ZFS Dataset Best Practices](dataset-best-practices.md) — recommended properties by workload type
-- [NFS Client Configuration](nfs-client-config.md) — mounting NFS exports from the SAN
-- [NFS Security](nfs-security.md) — why `sec=sys` is used; Kerberos alternative
-
-### Cluster & Fencing
-
-- [STONITH Smart Plugs](stonith-smart-plugs.md) — Kasa, Tasmota, ESPHome, HTTP fence agents
-- [Watchdog](watchdog.md) — hardware/software watchdog setup and STONITH interaction
-- [Cockpit HA Configuration](cockpit-ha-config.md) — VIP access, shared config sync via symlinks
-
-### Monitoring & Alerting
-
-- [Cluster Monitoring](cluster-monitoring.md) — Prometheus scrape config, key metrics, Grafana
-- [NTFY Integration](ntfy-integration.md) — Alertmanager push notifications + dead-man's switch
-- [Prometheus Alert Rules](https://github.com/vipervire/ha-san-ansible/blob/main/docs/prometheus-alerts.yml) — example alert definitions
-- [Prometheus Recording Rules](https://github.com/vipervire/ha-san-ansible/blob/main/docs/prometheus-recording-rules.yml) — aggregation rules
-
----
-
 ## Roles
 
 | Role | Purpose |

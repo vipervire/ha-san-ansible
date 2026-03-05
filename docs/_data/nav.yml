@@ -1,0 +1,37 @@
+- title: Operations
+  links:
+    - title: Operations Runbook
+      url: ha-san-ops.html
+    - title: Architecture Overview
+      url: ha-san-design.html
+    - title: Rolling OS Upgrade
+      url: os-upgrade.html
+    - title: iSCSI Recovery
+      url: iscsi-recovery.html
+    - title: Ubuntu / AlmaLinux Notes
+      url: ubuntu-notes.html
+
+- title: Storage
+  links:
+    - title: ZFS Dataset Best Practices
+      url: dataset-best-practices.html
+    - title: NFS Client Configuration
+      url: nfs-client-config.html
+    - title: NFS Security
+      url: nfs-security.html
+
+- title: Cluster & Fencing
+  links:
+    - title: STONITH Smart Plugs
+      url: stonith-smart-plugs.html
+    - title: Watchdog
+      url: watchdog.html
+    - title: Cockpit HA Config
+      url: cockpit-ha-config.html
+
+- title: Monitoring & Alerting
+  links:
+    - title: Cluster Monitoring
+      url: cluster-monitoring.html
+    - title: NTFY Integration
+      url: ntfy-integration.html
