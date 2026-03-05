@@ -3,8 +3,6 @@
 > **Automated helper available:** The `os-upgrade.yml` playbook automates pre-upgrade safety
 > checks, node standby/failover, and post-upgrade verification. This document explains the
 > full procedure; the commands reference the playbook where appropriate.
->
-> For the original manual procedure, see `docs/upgrade-procedure.md`.
 
 ## Overview
 

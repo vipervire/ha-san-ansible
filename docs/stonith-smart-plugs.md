@@ -23,7 +23,7 @@ The playbook now supports **mixed fencing methods** where different nodes can us
 ### Configuration Example
 
 ```yaml
-# In group_vars/storage_nodes.yml
+# In group_vars/storage_nodes/cluster.yml
 stonith_nodes:
   storage-a:
     method: "ipmi"           # Enterprise server with BMC
@@ -491,7 +491,7 @@ The `fence_check` agent:
 Enabled by default (`stonith_fence_verify: true` in `roles/pacemaker/defaults/main.yml`). To disable:
 
 ```yaml
-# group_vars/storage_nodes.yml
+# group_vars/storage_nodes/cluster.yml
 stonith_fence_verify: false
 ```
 

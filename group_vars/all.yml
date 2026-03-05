@@ -3,7 +3,7 @@
 # HA ZFS-over-iSCSI SAN — Global Variables
 # =============================================================================
 # These variables are shared across ALL nodes (storage + quorum).
-# Override per-group in group_vars/storage_nodes.yml or per-host in host_vars/.
+# Override per-group in group_vars/storage_nodes/ or per-host in host_vars/.
 
 # ---------------------------------------------------------------------------
 # Cluster identity
