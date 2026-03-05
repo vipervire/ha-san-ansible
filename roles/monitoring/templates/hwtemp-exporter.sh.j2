@@ -70,7 +70,7 @@ SAS_DRIVER_ALLOWLIST="mpt3sas mpt2sas megaraid_sas aacraid hpsa smartpqi pm80xx"
       pci_slot="$(basename "$(readlink -f "${iface_path}device")" 2>/dev/null)" || continue
       # MST device naming: /dev/mst/mt<device_id>_pciconf0
       # Try to find via mst status output
-      mst_device="$(mst status -v 2>/dev/null | awk -v pci="${pci_slot}" '$0 ~ pci {print $1}' | head -1)" || true
+      mst_device="$(mst status -v 2>/dev/null | awk -v pci="${pci_slot}" 'index($0, pci) {print $1}' | head -1)" || true
       [[ -z "${mst_device}" ]] && continue
       [[ ! -e "${mst_device}" ]] && continue
 
