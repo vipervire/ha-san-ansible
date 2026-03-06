@@ -8,3 +8,7 @@
   ansible.builtin.command:
     cmd: testparm -s
   changed_when: false
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true

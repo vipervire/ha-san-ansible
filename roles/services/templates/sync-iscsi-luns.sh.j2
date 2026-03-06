@@ -1,0 +1,136 @@
+#!/bin/bash
+# Managed by Ansible — Auto-discover zvols and map as client-facing iSCSI LUNs
+#
+# This script is called by Pacemaker (via systemd) after the ZFS pool imports.
+# It ensures every zvol under the iSCSI dataset has a corresponding LIO
+# backstore and LUN mapping — regardless of how the zvol was created:
+#   - ZFS-over-iSCSI Proxmox plugin
+#   - Houston Cockpit UI
+#   - Manual 'zfs create -V'
+#   - Ansible
+#
+# Safe to re-run: idempotent. Adds missing LUNs, removes stale backstores,
+# never touches zvols or existing ACLs.
+#
+# Usage: bash /root/sync-iscsi-luns.sh
+set -euo pipefail
+
+TARGET_IQN="{{ iscsi_client_iqn }}"
+ZVOL_PARENT="{{ zfs_pool_name }}/{{ iscsi_client_zvol_dataset | default('iscsi') }}"
+ZVOL_DEV_BASE="/dev/zvol/${ZVOL_PARENT}"
+CHANGED=0
+
+echo "=== Syncing iSCSI LUNs for target: ${TARGET_IQN} ==="
+echo "    Scanning zvols under: ${ZVOL_PARENT}"
+
+# Verify the target exists (created by setup-client-iscsi-target.sh)
+if ! targetcli ls /iscsi/"${TARGET_IQN}" &>/dev/null 2>&1; then
+    echo "ERROR: iSCSI target ${TARGET_IQN} does not exist."
+    echo "       Run /root/setup-client-iscsi-target.sh first."
+    exit 1
+fi
+
+# ─── Phase 1: Add backstores + LUN mappings for new zvols ─────────────────
+
+# Find all zvols (block devices) under the iSCSI dataset.
+# zvols appear as /dev/zvol/<pool>/<dataset>/<name> — skip nested datasets
+# by only looking at direct children (symlinks in /dev/zvol/ tree).
+if [ -d "${ZVOL_DEV_BASE}" ]; then
+    for zvol_path in "${ZVOL_DEV_BASE}"/*; do
+        # Skip if not a block device (could be a dataset directory)
+        [ -b "$zvol_path" ] || continue
+
+        zvol_name=$(basename "$zvol_path")
+
+        # Check if backstore already exists
+        if targetcli ls /backstores/block/"${zvol_name}" &>/dev/null 2>&1; then
+            continue
+        fi
+
+        echo "  + Adding backstore: ${zvol_name} → ${zvol_path}"
+        targetcli /backstores/block create "${zvol_name}" "${zvol_path}"
+
+        echo "  + Mapping LUN: ${zvol_name}"
+        targetcli /iscsi/"${TARGET_IQN}"/tpg1/luns create /backstores/block/"${zvol_name}"
+
+        CHANGED=1
+    done
+else
+    echo "  (no zvol directory at ${ZVOL_DEV_BASE} — pool may have no iSCSI zvols yet)"
+fi
+
+# ─── Phase 2: Remove stale backstores for deleted zvols ───────────────────
+# Only remove backstores whose expected zvol path under our managed dataset
+# no longer exists (zvol was deleted via Houston, plugin, or manually).
+# We infer the zvol path from the backstore name: if a backstore is named
+# "vm-disk-01", it was created by Phase 1 pointing at /dev/zvol/<parent>/vm-disk-01.
+
+while IFS= read -r bs_name; do
+    [ -n "$bs_name" ] || continue
+
+    expected_dev="${ZVOL_DEV_BASE}/${bs_name}"
+
+    # Only manage backstores that correspond to our zvol dataset
+    # (skip backstores created manually for other purposes)
+    if [ ! -b "$expected_dev" ] && [ -d "${ZVOL_DEV_BASE}" ]; then
+        # Verify this backstore actually points to our zvol parent before deleting
+        bs_udev=$(targetcli ls "/backstores/block/${bs_name}" 2>/dev/null | grep -o '/dev/zvol/[^ ]*' || true)
+        case "$bs_udev" in
+            /dev/zvol/${ZVOL_PARENT}/*)
+                echo "  - Removing stale backstore: ${bs_name} (zvol deleted)"
+                targetcli /backstores/block delete "${bs_name}"
+                CHANGED=1
+                ;;
+        esac
+    fi
+done < <(targetcli ls /backstores/block/ 2>/dev/null | grep -oP '(?<=o- )\S+' || true)
+
+# ─── Phase 3: Sync ACLs from shared storage ────────────────────────────────
+# The authoritative ACL list lives on the ZFS pool so both nodes share it.
+# Seeded by setup-client-iscsi-target.sh; editable by operators on shared
+# storage without re-running Ansible.
+ACLS_FILE="/{{ zfs_pool_name }}/cluster-config/iscsi/acls.conf"
+TPG_ACLS="/iscsi/${TARGET_IQN}/tpg1/acls"
+
+if [ -f "${ACLS_FILE}" ]; then
+    # Build list of desired IQNs (skip blanks and comments)
+    mapfile -t DESIRED_IQNS < <(grep -v '^\s*#' "${ACLS_FILE}" | grep -v '^\s*$' || true)
+
+    # Add missing ACLs
+    for iqn in "${DESIRED_IQNS[@]}"; do
+        [ -n "$iqn" ] || continue
+        if ! targetcli ls "${TPG_ACLS}/${iqn}" &>/dev/null 2>&1; then
+            echo "  + Adding ACL: ${iqn}"
+            targetcli "${TPG_ACLS}" create "${iqn}"
+            CHANGED=1
+        fi
+    done
+
+    # Remove stale ACLs (present in LIO but not in acls.conf)
+    while IFS= read -r existing_iqn; do
+        [ -n "$existing_iqn" ] || continue
+        found=false
+        for iqn in "${DESIRED_IQNS[@]}"; do
+            if [ "$iqn" = "$existing_iqn" ]; then
+                found=true
+                break
+            fi
+        done
+        if [ "$found" = "false" ]; then
+            echo "  - Removing stale ACL: ${existing_iqn}"
+            targetcli "${TPG_ACLS}" delete "${existing_iqn}"
+            CHANGED=1
+        fi
+    done < <(targetcli ls "${TPG_ACLS}" 2>/dev/null | grep -oP '(?<=o- )\S+' || true)
+else
+    echo "  (no ACL file at ${ACLS_FILE} — skipping ACL sync)"
+fi
+
+# ─── Save config if anything changed ─────────────────────────────────────
+
+if [ "$CHANGED" -eq 1 ]; then
+    targetcli saveconfig
+    echo "=== LIO configuration saved ==="
+else
+    echo "=== No changes needed — all LUNs in sync ==="
+fi
