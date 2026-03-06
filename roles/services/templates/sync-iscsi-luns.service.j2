@@ -1,0 +1,19 @@
+# Managed by Ansible — Pacemaker-managed oneshot service
+# Syncs ZFS zvols to LIO iSCSI LUN mappings after pool import.
+#
+# This service is NOT enabled at boot — Pacemaker starts it as a
+# cluster resource ordered after zfs-pool and before vip-iscsi.
+[Unit]
+Description=Sync ZFS zvols to iSCSI LUN mappings
+After=rtslib-fb-targetctl.service
+Requires=rtslib-fb-targetctl.service
+
+[Service]
+Type=oneshot
+ExecStart=/root/sync-iscsi-luns.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -44,6 +44,7 @@
     - "nfs"
     - "samba"
     - "samba/private"
+    - "iscsi"
   when: >
     ansible_mounts | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0
   ignore_errors: true
@@ -133,3 +134,29 @@
     - iscsi_client_acls | length > 0
     - client_lio_check.rc is defined
     - client_lio_check.rc != 0
+
+# ─── iSCSI LUN auto-sync (maps zvols to LUNs on pool import) ────────────
+# Ensures zvols created by any method (Houston Cockpit, ZFS-over-iSCSI
+# plugin, manual zfs create) are mapped as LUNs on both nodes after
+# failover. Pacemaker runs this between zfs-pool import and vip-iscsi.
+- name: Deploy iSCSI LUN sync script
+  ansible.builtin.template:
+    src: sync-iscsi-luns.sh.j2
+    dest: /root/sync-iscsi-luns.sh
+    mode: "0700"
+  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
+
+- name: Deploy iSCSI LUN sync systemd service
+  ansible.builtin.template:
+    src: sync-iscsi-luns.service.j2
+    dest: /etc/systemd/system/sync-iscsi-luns.service
+    mode: "0644"
+  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
+  notify: reload systemd
+
+- name: Disable sync-iscsi-luns auto-start (Pacemaker manages this)
+  ansible.builtin.systemd:
+    name: sync-iscsi-luns
+    enabled: false
+    daemon_reload: true
+  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0

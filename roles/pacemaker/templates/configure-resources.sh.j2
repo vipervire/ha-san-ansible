@@ -96,7 +96,20 @@ pcs resource group add smb-group vip-smb smb-server \
 pcs resource group add cockpit-group vip-cockpit cockpit-service \
   2>/dev/null || echo "  (cockpit-group already exists)"
 
-# vip-iscsi is standalone (no Pacemaker-managed service behind it)
+# ─── iSCSI LUN sync (auto-maps zvols to LIO LUNs after pool import) ──────
+# Runs after pool import so /dev/zvol/ entries exist, before vip-iscsi so
+# Proxmox/k3s initiators see all LUNs when they reconnect after failover.
+# Handles zvols created by any method: Houston Cockpit, ZFS-over-iSCSI
+# plugin, manual 'zfs create -V', or Ansible.
+echo "Creating iSCSI LUN sync resource"
+pcs resource create sync-iscsi-luns systemd:sync-iscsi-luns \
+  op start timeout=30s op stop timeout=10s \
+  op monitor interval=0 \
+  2>/dev/null || echo "  (sync-iscsi-luns already exists)"
+
+# Group: sync LUNs, then bring up the iSCSI VIP
+pcs resource group add iscsi-group sync-iscsi-luns vip-iscsi \
+  2>/dev/null || echo "  (iscsi-group already exists)"
 
 # ─── Ordering: pool must be fully started before any VIP/service group ─────
 # Groups start in parallel after pool — no ordering between groups.
@@ -111,8 +124,8 @@ pcs constraint order zfs-pool then nfs-group \
   2>/dev/null || echo "  (order zfs-pool->nfs-group already exists)"
 pcs constraint order zfs-pool then smb-group \
   2>/dev/null || echo "  (order zfs-pool->smb-group already exists)"
-pcs constraint order zfs-pool then vip-iscsi \
-  2>/dev/null || echo "  (order zfs-pool->vip-iscsi already exists)"
+pcs constraint order zfs-pool then iscsi-group \
+  2>/dev/null || echo "  (order zfs-pool->iscsi-group already exists)"
 pcs constraint order zfs-pool then cockpit-group \
   2>/dev/null || echo "  (order zfs-pool->cockpit-group already exists)"
 
@@ -122,8 +135,8 @@ pcs constraint colocation add nfs-group with zfs-pool INFINITY \
   2>/dev/null || echo "  (colocation nfs-group already exists)"
 pcs constraint colocation add smb-group with zfs-pool INFINITY \
   2>/dev/null || echo "  (colocation smb-group already exists)"
-pcs constraint colocation add vip-iscsi with zfs-pool INFINITY \
-  2>/dev/null || echo "  (colocation vip-iscsi already exists)"
+pcs constraint colocation add iscsi-group with zfs-pool INFINITY \
+  2>/dev/null || echo "  (colocation iscsi-group already exists)"
 pcs constraint colocation add cockpit-group with zfs-pool INFINITY \
   2>/dev/null || echo "  (colocation cockpit-group already exists)"
 
