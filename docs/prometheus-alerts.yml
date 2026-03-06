@@ -619,6 +619,76 @@ groups:
             {{ $value }} correctable ECC errors in the past hour on {{ $labels.instance }}.
             Correctable errors indicate degrading DIMM — schedule replacement.
 
+  # =========================================================================
+  # NIC / HBA / SFP Temperature Alerts
+  # =========================================================================
+  - name: hwtemp_alerts
+    interval: 5m
+    rules:
+      - alert: NICTemperatureHigh
+        expr: node_nic_temperature_celsius > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: hardware
+        annotations:
+          summary: "NIC temperature high on {{ $labels.instance }}"
+          description: |
+            NIC {{ $labels.interface }} sensor {{ $labels.sensor }} on {{ $labels.instance }}
+            is {{ $value }}°C — above 80°C warning threshold.
+            Check chassis airflow and NIC heatsink/fan.
+
+      - alert: NICTemperatureCritical
+        expr: node_nic_temperature_celsius > 95
+        for: 5m
+        labels:
+          severity: critical
+          component: hardware
+        annotations:
+          summary: "NIC temperature critical on {{ $labels.instance }}"
+          description: |
+            NIC {{ $labels.interface }} sensor {{ $labels.sensor }} on {{ $labels.instance }}
+            is {{ $value }}°C — above 95°C critical threshold.
+            Risk of hardware damage or thermal shutdown. Check cooling immediately.
+
+      - alert: SFPTemperatureHigh
+        expr: node_nic_sfp_temperature_celsius > 70
+        for: 10m
+        labels:
+          severity: warning
+          component: hardware
+        annotations:
+          summary: "SFP transceiver temperature high on {{ $labels.instance }}"
+          description: |
+            SFP/QSFP transceiver on {{ $labels.interface }} at {{ $labels.instance }}
+            is {{ $value }}°C — above 70°C warning threshold.
+            Check transceiver compatibility, cable bend radius, and cage airflow.
+
+      - alert: HBATemperatureHigh
+        expr: node_hba_temperature_celsius > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: hardware
+        annotations:
+          summary: "HBA temperature high on {{ $labels.instance }}"
+          description: |
+            HBA {{ $labels.host }} (driver: {{ $labels.driver }}, pci: {{ $labels.pci_slot }})
+            on {{ $labels.instance }} is {{ $value }}°C — above 80°C warning threshold.
+            Check chassis airflow and HBA heatsink.
+
+      - alert: HWTempExporterFailed
+        expr: node_hwtemp_exporter_success == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "HW temperature exporter failing on {{ $labels.instance }}"
+          description: |
+            The hwtemp-exporter on {{ $labels.instance }} is not producing valid metrics.
+            Check logs: journalctl -u hwtemp-exporter.service
+
   - name: time_sync
     rules:
       - alert: ClockDrift

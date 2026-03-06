@@ -1,0 +1,168 @@
+#!/bin/bash
+# Managed by Ansible — NIC, SFP, and HBA temperature metrics exporter
+# Reads hwmon sysfs, ethtool module info, and optionally Mellanox MFT (mget_temp).
+# Graceful: emits only the success metric when no hardware exposes temperatures.
+
+set -euo pipefail
+
+OUTFILE="/var/lib/prometheus/node-exporter/hwtemp.prom"
+TMPFILE="${OUTFILE}.tmp"
+
+# SAS HBA drivers whose hwmon entries we trust
+SAS_DRIVER_ALLOWLIST="mpt3sas mpt2sas megaraid_sas aacraid hpsa smartpqi pm80xx"
+
+{
+  echo "# HELP node_nic_temperature_celsius NIC chip temperature from hwmon sysfs"
+  echo "# TYPE node_nic_temperature_celsius gauge"
+  echo "# HELP node_nic_mft_temperature_celsius NIC chip temperature from Mellanox MFT (mlx4)"
+  echo "# TYPE node_nic_mft_temperature_celsius gauge"
+  echo "# HELP node_nic_sfp_temperature_celsius SFP/QSFP transceiver temperature from ethtool"
+  echo "# TYPE node_nic_sfp_temperature_celsius gauge"
+  echo "# HELP node_hba_temperature_celsius HBA controller temperature from hwmon sysfs"
+  echo "# TYPE node_hba_temperature_celsius gauge"
+  echo "# HELP node_hwtemp_exporter_success Whether the hwtemp exporter ran successfully (1=ok)"
+  echo "# TYPE node_hwtemp_exporter_success gauge"
+
+  # ── NIC temperatures (hwmon sysfs) ──────────────────────────────────────────
+  declare -A IFACE_HAS_HWMON
+
+  for iface_path in /sys/class/net/*/; do
+    iface="$(basename "${iface_path}")"
+
+    # Skip loopback and virtual interfaces (no device/ symlink = virtual)
+    [[ "${iface}" == "lo" ]] && continue
+    [[ ! -L "${iface_path}device" ]] && continue
+
+    IFACE_HAS_HWMON["${iface}"]=0
+
+    for hwmon_dir in "${iface_path}device/hwmon/hwmon"*/; do
+      [[ -d "${hwmon_dir}" ]] || continue
+      for temp_file in "${hwmon_dir}"temp*_input; do
+        [[ -f "${temp_file}" ]] || continue
+        millideg="$(cat "${temp_file}" 2>/dev/null)" || continue
+        [[ "${millideg}" =~ ^[0-9]+$ ]] || continue
+        celsius="$(awk "BEGIN {printf \"%.1f\", ${millideg}/1000}")"
+        # Derive sensor name from filename: temp1_input → temp1
+        sensor="$(basename "${temp_file}" _input)"
+        echo "node_nic_temperature_celsius{interface=\"${iface}\",sensor=\"${sensor}\"} ${celsius}"
+        IFACE_HAS_HWMON["${iface}"]=1
+      done
+    done
+  done
+
+  # ── NIC temperatures (MFT fallback for mlx4/ConnectX-3 without hwmon) ───────
+  if command -v mget_temp &>/dev/null && command -v mst &>/dev/null; then
+    mst start &>/dev/null || true  # idempotent — already running is fine
+    for iface_path in /sys/class/net/*/; do
+      iface="$(basename "${iface_path}")"
+      [[ "${iface}" == "lo" ]] && continue
+      [[ ! -L "${iface_path}device" ]] && continue
+      # Only fall back to MFT if hwmon found no readings for this interface
+      [[ "${IFACE_HAS_HWMON[${iface}]:-0}" == "1" ]] && continue
+
+      vendor_file="${iface_path}device/vendor"
+      [[ -f "${vendor_file}" ]] || continue
+      vendor="$(cat "${vendor_file}" 2>/dev/null | tr -d '[:space:]')" || continue
+      # Mellanox vendor ID
+      [[ "${vendor}" == "0x15b3" ]] || continue
+
+      # Map PCI slot to MST device: /sys/class/net/<iface>/device → PCI addr
+      pci_slot="$(basename "$(readlink -f "${iface_path}device")" 2>/dev/null)" || continue
+      # MST device naming: /dev/mst/mt<device_id>_pciconf0
+      # Try to find via mst status output
+      mst_device="$(mst status -v 2>/dev/null | awk -v pci="${pci_slot}" 'index($0, pci) {print $1}' | head -1)" || true
+      [[ -z "${mst_device}" ]] && continue
+      [[ ! -e "${mst_device}" ]] && continue
+
+      temp_raw="$(mget_temp -d "${mst_device}" 2>/dev/null | grep -i "temperature" | awk '{print $NF}' | tr -d 'C')" || continue
+      [[ "${temp_raw}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || continue
+      echo "node_nic_mft_temperature_celsius{device=\"${mst_device}\"} ${temp_raw}"
+    done
+  fi
+
+  # ── SFP/QSFP transceiver temperatures (ethtool) ─────────────────────────────
+  if command -v ethtool &>/dev/null; then
+    for iface_path in /sys/class/net/*/; do
+      iface="$(basename "${iface_path}")"
+      [[ "${iface}" == "lo" ]] && continue
+      [[ ! -L "${iface_path}device" ]] && continue
+
+      sfp_temp="$(ethtool -m "${iface}" 2>/dev/null \
+        | grep -i "^[[:space:]]*Laser tx bias current\|^[[:space:]]*Module temperature\|Temperature" \
+        | grep -i "temperature" \
+        | head -1 \
+        | awk -F: '{print $2}' \
+        | awk '{print $1}')" || true
+      [[ -z "${sfp_temp}" ]] && continue
+      [[ "${sfp_temp}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || continue
+      echo "node_nic_sfp_temperature_celsius{interface=\"${iface}\"} ${sfp_temp}"
+    done
+  fi
+
+  # ── HBA temperatures — Fibre Channel ─────────────────────────────────────────
+  for fc_host_path in /sys/class/fc_host/host*/; do
+    [[ -d "${fc_host_path}" ]] || continue
+    host="$(basename "${fc_host_path}")"
+    driver=""
+    pci_slot=""
+
+    if [[ -L "${fc_host_path}device/driver" ]]; then
+      driver="$(basename "$(readlink -f "${fc_host_path}device/driver")")"
+    fi
+    if [[ -L "${fc_host_path}device" ]]; then
+      pci_slot="$(basename "$(readlink -f "${fc_host_path}device")")"
+    fi
+
+    for hwmon_dir in "${fc_host_path}device/hwmon/hwmon"*/; do
+      [[ -d "${hwmon_dir}" ]] || continue
+      for temp_file in "${hwmon_dir}"temp*_input; do
+        [[ -f "${temp_file}" ]] || continue
+        millideg="$(cat "${temp_file}" 2>/dev/null)" || continue
+        [[ "${millideg}" =~ ^[0-9]+$ ]] || continue
+        celsius="$(awk "BEGIN {printf \"%.1f\", ${millideg}/1000}")"
+        sensor="$(basename "${temp_file}" _input)"
+        echo "node_hba_temperature_celsius{host=\"${host}\",driver=\"${driver}\",pci_slot=\"${pci_slot}\",sensor=\"${sensor}\"} ${celsius}"
+      done
+    done
+  done
+
+  # ── HBA temperatures — SAS (driver allowlist only) ───────────────────────────
+  for scsi_host_path in /sys/class/scsi_host/host*/; do
+    [[ -d "${scsi_host_path}" ]] || continue
+    host="$(basename "${scsi_host_path}")"
+    driver=""
+    pci_slot=""
+
+    if [[ -L "${scsi_host_path}device/driver" ]]; then
+      driver="$(basename "$(readlink -f "${scsi_host_path}device/driver")")"
+    fi
+
+    # Only process SAS HBAs from the allowlist (skip SATA/USB/etc.)
+    allowed=0
+    for allowed_driver in ${SAS_DRIVER_ALLOWLIST}; do
+      [[ "${driver}" == "${allowed_driver}" ]] && { allowed=1; break; }
+    done
+    [[ "${allowed}" == "1" ]] || continue
+
+    if [[ -L "${scsi_host_path}device" ]]; then
+      pci_slot="$(basename "$(readlink -f "${scsi_host_path}device")")"
+    fi
+
+    for hwmon_dir in "${scsi_host_path}device/hwmon/hwmon"*/; do
+      [[ -d "${hwmon_dir}" ]] || continue
+      for temp_file in "${hwmon_dir}"temp*_input; do
+        [[ -f "${temp_file}" ]] || continue
+        millideg="$(cat "${temp_file}" 2>/dev/null)" || continue
+        [[ "${millideg}" =~ ^[0-9]+$ ]] || continue
+        celsius="$(awk "BEGIN {printf \"%.1f\", ${millideg}/1000}")"
+        sensor="$(basename "${temp_file}" _input)"
+        echo "node_hba_temperature_celsius{host=\"${host}\",driver=\"${driver}\",pci_slot=\"${pci_slot}\",sensor=\"${sensor}\"} ${celsius}"
+      done
+    done
+  done
+
+  echo "node_hwtemp_exporter_success 1"
+} > "${TMPFILE}"
+
+mv "${TMPFILE}" "${OUTFILE}"
+chmod 644 "${OUTFILE}"
