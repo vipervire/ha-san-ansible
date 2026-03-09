@@ -8,6 +8,10 @@ ListenAddress {{ addr }}
 {% for cv in client_vlans | default([]) %}
 {% if 'ssh' in cv.services %}
 # SSH on {{ cv.name }} VLAN for Proxmox ZFS-over-iSCSI
+# Binding to a floating VIP requires net.ipv4.ip_nonlocal_bind=1 (set via
+# sysctl.d by the networking role). sshd has no per-listener FreeBind option,
+# so the global sysctl must be loaded before sshd starts. systemd-sysctl.service
+# runs early in boot (before sshd.service), so this is safe under normal ordering.
 ListenAddress {{ cv.vip }}
 {% endif %}
 {% endfor %}
