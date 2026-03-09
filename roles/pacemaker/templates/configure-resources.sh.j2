@@ -35,14 +35,22 @@ pcs resource create zfs-pool ocf:heartbeat:ZFS \
 # ─── Virtual IPs — one per client VLAN ───────────────────────────────────────
 # nic= ensures the VIP binds to the correct VLAN interface. Without it,
 # IPaddr2 auto-detection may pick the wrong interface on multi-VLAN hosts.
+# Interface naming depends on whether systemd-networkd manages interfaces:
+#   networking_manage: true  → "enduser-vlan"  (systemd-networkd netdev name)
+#   networking_manage: false → "ens3f1.30"     (traditional admin-managed name)
 echo "Creating/updating client VLAN VIP resources"
 {% for cv in client_vlans %}
+{% if networking_manage | default(false) %}
+{% set _nic = cv.name ~ '-vlan' %}
+{% else %}
+{% set _nic = (cv.parent_interface | default(net_client_parent)) ~ '.' ~ cv.id | string %}
+{% endif %}
 pcs resource create vip-{{ cv.name }} ocf:heartbeat:IPaddr2 \
   ip="{{ cv.vip }}" cidr_netmask={{ cv.vip_cidr }} \
-  nic="{{ cv.parent_interface | default(net_client_parent) }}.{{ cv.id }}" \
+  nic="{{ _nic }}" \
   op monitor interval=10s \
   2>/dev/null || \
-  pcs resource update vip-{{ cv.name }} ip="{{ cv.vip }}" cidr_netmask={{ cv.vip_cidr }} nic="{{ cv.parent_interface | default(net_client_parent) }}.{{ cv.id }}"
+  pcs resource update vip-{{ cv.name }} ip="{{ cv.vip }}" cidr_netmask={{ cv.vip_cidr }} nic="{{ _nic }}"
 
 {% endfor %}
 # Management VLAN VIP for Cockpit
