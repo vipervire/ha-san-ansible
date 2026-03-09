@@ -1,11 +1,10 @@
-# Managed by Ansible — client interface configuration
-# Client VLAN: NFS, SMB, iSCSI client traffic (jumbo frames)
+# Managed by Ansible — client VLAN {{ cv.name }} ({{ cv.id }})
+# {{ cv.description | default(cv.services | join(', ')) }}
 [Match]
-Name={{ net_client_parent }}
+Name={{ cv.name }}-vlan
 
 [Network]
-Address={{ client_ip }}/{{ vlans.client.subnet.split('/')[1] }}
-VLAN=client-vlan
+Address={{ client_ips[cv.name] }}/{{ cv.subnet.split('/')[1] }}
 
 [Link]
-MTUBytes={{ vlans.client.mtu | default(9000) }}
+MTUBytes={{ cv.mtu | default(9000) }}

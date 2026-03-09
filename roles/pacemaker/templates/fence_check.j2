@@ -32,7 +32,7 @@ FENCE_USER=""
 FENCE_PASS=""
 TARGET_MGMT_IP=""
 TARGET_STORAGE_IP=""
-TARGET_CLIENT_IP=""
+TARGET_CLIENT_IPS=""
 VERIFY_WAIT="10"
 STATUS_URL=""
 STATUS_ON_REGEX="ON"
@@ -44,20 +44,20 @@ parse_stdin() {
         KEY="${KEY//[[:space:]]/}"
         VALUE="${VALUE//[[:space:]]/}"
         case "$KEY" in
-            action)            ACTION="$VALUE" ;;
-            port)              PORT="$VALUE" ;;
-            fence_method)      FENCE_METHOD="$VALUE" ;;
-            fence_ip)          FENCE_IP="$VALUE" ;;
-            fence_user)        FENCE_USER="$VALUE" ;;
-            fence_pass)        FENCE_PASS="$VALUE" ;;
-            target_mgmt_ip)    TARGET_MGMT_IP="$VALUE" ;;
-            target_storage_ip) TARGET_STORAGE_IP="$VALUE" ;;
-            target_client_ip)  TARGET_CLIENT_IP="$VALUE" ;;
-            verify_wait)       VERIFY_WAIT="$VALUE" ;;
-            status_url)        STATUS_URL="$VALUE" ;;
-            status_on_regex)   STATUS_ON_REGEX="$VALUE" ;;
-            status_off_regex)  STATUS_OFF_REGEX="$VALUE" ;;
-            switch_name)       SWITCH_NAME="$VALUE" ;;
+            action)             ACTION="$VALUE" ;;
+            port)               PORT="$VALUE" ;;
+            fence_method)       FENCE_METHOD="$VALUE" ;;
+            fence_ip)           FENCE_IP="$VALUE" ;;
+            fence_user)         FENCE_USER="$VALUE" ;;
+            fence_pass)         FENCE_PASS="$VALUE" ;;
+            target_mgmt_ip)     TARGET_MGMT_IP="$VALUE" ;;
+            target_storage_ip)  TARGET_STORAGE_IP="$VALUE" ;;
+            target_client_ips)  TARGET_CLIENT_IPS="$VALUE" ;;
+            verify_wait)        VERIFY_WAIT="$VALUE" ;;
+            status_url)         STATUS_URL="$VALUE" ;;
+            status_on_regex)    STATUS_ON_REGEX="$VALUE" ;;
+            status_off_regex)   STATUS_OFF_REGEX="$VALUE" ;;
+            switch_name)        SWITCH_NAME="$VALUE" ;;
         esac
     done
 }
@@ -72,18 +72,18 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -o|--action)   ACTION="$2"; shift ;;
         -n|--plug)     PORT="$2"; shift ;;
-        --fence_method)      FENCE_METHOD="$2"; shift ;;
-        --fence_ip)          FENCE_IP="$2"; shift ;;
-        --fence_user)        FENCE_USER="$2"; shift ;;
-        --fence_pass)        FENCE_PASS="$2"; shift ;;
-        --target_mgmt_ip)    TARGET_MGMT_IP="$2"; shift ;;
-        --target_storage_ip) TARGET_STORAGE_IP="$2"; shift ;;
-        --target_client_ip)  TARGET_CLIENT_IP="$2"; shift ;;
-        --verify_wait)       VERIFY_WAIT="$2"; shift ;;
-        --status_url)        STATUS_URL="$2"; shift ;;
-        --status_on_regex)   STATUS_ON_REGEX="$2"; shift ;;
-        --status_off_regex)  STATUS_OFF_REGEX="$2"; shift ;;
-        --switch_name)       SWITCH_NAME="$2"; shift ;;
+        --fence_method)       FENCE_METHOD="$2"; shift ;;
+        --fence_ip)           FENCE_IP="$2"; shift ;;
+        --fence_user)         FENCE_USER="$2"; shift ;;
+        --fence_pass)         FENCE_PASS="$2"; shift ;;
+        --target_mgmt_ip)     TARGET_MGMT_IP="$2"; shift ;;
+        --target_storage_ip)  TARGET_STORAGE_IP="$2"; shift ;;
+        --target_client_ips)  TARGET_CLIENT_IPS="$2"; shift ;;
+        --verify_wait)        VERIFY_WAIT="$2"; shift ;;
+        --status_url)         STATUS_URL="$2"; shift ;;
+        --status_on_regex)    STATUS_ON_REGEX="$2"; shift ;;
+        --status_off_regex)   STATUS_OFF_REGEX="$2"; shift ;;
+        --switch_name)        SWITCH_NAME="$2"; shift ;;
         -h|--help) ACTION="metadata" ;;
     esac
     shift
@@ -97,7 +97,7 @@ if [ "${ACTION}" = "metadata" ]; then
   <longdesc>
     Verifies that a fenced node is actually dead by:
     1. Querying the STONITH device power state (must report OFF)
-    2. Pinging the target on management, storage, and client VLANs (all must be unreachable)
+    2. Pinging the target on management, storage, and all client VLANs (all must be unreachable)
     Used as a second resource in a Pacemaker fencing level to validate the primary
     fence agent's action.
   </longdesc>
@@ -143,10 +143,10 @@ if [ "${ACTION}" = "metadata" ]; then
       <content type="string"/>
       <shortdesc>Target node storage network IP to ping</shortdesc>
     </parameter>
-    <parameter name="target_client_ip" unique="0" required="1">
-      <getopt mixed="--target_client_ip"/>
+    <parameter name="target_client_ips" unique="0" required="1">
+      <getopt mixed="--target_client_ips"/>
       <content type="string"/>
-      <shortdesc>Target node client network IP to ping</shortdesc>
+      <shortdesc>Comma-separated client VLAN IPs to ping (all must be unreachable)</shortdesc>
     </parameter>
     <parameter name="verify_wait" unique="0" required="0">
       <getopt mixed="--verify_wait"/>
@@ -294,18 +294,26 @@ if [ "${ACTION}" = "status" ]; then
     POWER=$(query_power_state)
     MGMT_UP=0
     STORAGE_UP=0
-    CLIENT_UP=0
+    REACHABLE=0
     [ -n "${TARGET_MGMT_IP}" ]    && is_reachable "${TARGET_MGMT_IP}"    && MGMT_UP=1    || true
     [ -n "${TARGET_STORAGE_IP}" ] && is_reachable "${TARGET_STORAGE_IP}" && STORAGE_UP=1 || true
-    [ -n "${TARGET_CLIENT_IP}" ]  && is_reachable "${TARGET_CLIENT_IP}"  && CLIENT_UP=1  || true
-
-    REACHABLE=$(( MGMT_UP + STORAGE_UP + CLIENT_UP ))
+    REACHABLE=$(( MGMT_UP + STORAGE_UP ))
 
     echo "fence_check status for ${PORT:-unknown}:"
     echo "  STONITH device (${FENCE_METHOD} @ ${FENCE_IP}): power=${POWER}"
     echo "  Management   ${TARGET_MGMT_IP}:  $([ "${MGMT_UP}" = "1" ] && echo "reachable" || echo "unreachable")"
     echo "  Storage      ${TARGET_STORAGE_IP}: $([ "${STORAGE_UP}" = "1" ] && echo "reachable" || echo "unreachable")"
-    echo "  Client       ${TARGET_CLIENT_IP}:  $([ "${CLIENT_UP}" = "1" ] && echo "reachable" || echo "unreachable")"
+
+    # Check all client VLAN IPs
+    if [ -n "${TARGET_CLIENT_IPS}" ]; then
+        IFS=',' read -ra CLIENT_IP_ARRAY <<< "${TARGET_CLIENT_IPS}"
+        for cip in "${CLIENT_IP_ARRAY[@]}"; do
+            CIP_UP=0
+            is_reachable "${cip}" && CIP_UP=1 || true
+            echo "  Client       ${cip}:  $([ "${CIP_UP}" = "1" ] && echo "reachable" || echo "unreachable")"
+            REACHABLE=$(( REACHABLE + CIP_UP ))
+        done
+    fi
 
     if [ "${REACHABLE}" -eq 0 ] && [ "${POWER}" = "off" ]; then
         echo "Status: OFF"
@@ -354,13 +362,17 @@ if [ "${ACTION}" = "off" ]; then
         fi
     fi
 
-    if [ -n "${TARGET_CLIENT_IP}" ]; then
-        if is_reachable "${TARGET_CLIENT_IP}"; then
-            echo "fence_check: FAILED — ${PORT} still reachable on client (${TARGET_CLIENT_IP})" >&2
-            FAIL_COUNT=$(( FAIL_COUNT + 1 ))
-        else
-            echo "fence_check: OK — ${PORT} unreachable on client (${TARGET_CLIENT_IP})" >&2
-        fi
+    # Check all client VLAN IPs
+    if [ -n "${TARGET_CLIENT_IPS}" ]; then
+        IFS=',' read -ra CLIENT_IP_ARRAY <<< "${TARGET_CLIENT_IPS}"
+        for cip in "${CLIENT_IP_ARRAY[@]}"; do
+            if is_reachable "${cip}"; then
+                echo "fence_check: FAILED — ${PORT} still reachable on client (${cip})" >&2
+                FAIL_COUNT=$(( FAIL_COUNT + 1 ))
+            else
+                echo "fence_check: OK — ${PORT} unreachable on client (${cip})" >&2
+            fi
+        done
     fi
 
     if [ "${FAIL_COUNT}" -gt 0 ]; then

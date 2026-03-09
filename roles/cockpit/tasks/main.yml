@@ -33,6 +33,20 @@
     enabled: false
     state: stopped
 
+# ─── Bind Cockpit to management interface only (defense-in-depth) ───────────
+- name: Create cockpit.socket drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/cockpit.socket.d
+    state: directory
+    mode: "0755"
+
+- name: Deploy cockpit.socket listen override (management VLAN only)
+  ansible.builtin.template:
+    src: cockpit-socket-override.conf.j2
+    dest: /etc/systemd/system/cockpit.socket.d/listen.conf
+    mode: "0644"
+  notify: restart cockpit
+
 # ─── Custom TLS certificate for Cockpit (optional) ────────────────────────
 - name: Create Cockpit TLS cert directory
   ansible.builtin.file:

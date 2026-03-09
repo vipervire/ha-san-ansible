@@ -98,7 +98,7 @@ pcs stonith create fence-verify-{{ node_name }} fence_check \
   fence_pass="{{ node_cfg.password | default('') }}" \
   target_mgmt_ip="{{ hostvars[node_name].mgmt_ip }}" \
   target_storage_ip="{{ hostvars[node_name].storage_ip }}" \
-  target_client_ip="{{ hostvars[node_name].client_ip }}" \
+  target_client_ips="{{ hostvars[node_name].client_ips.values() | join(',') }}" \
   verify_wait="10" \
 {% if node_cfg.method == 'esphome' %}
   switch_name="{{ node_cfg.switch_name | default('relay') }}" \

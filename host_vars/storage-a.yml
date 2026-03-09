@@ -6,7 +6,11 @@
 # Network addresses per VLAN
 storage_ip: "10.10.10.1"
 mgmt_ip: "10.20.20.1"
-client_ip: "10.30.30.1"
+
+# Per-VLAN client IPs — keyed by client_vlans[].name
+client_ips:
+  enduser: "10.30.30.1"
+  hypervisor: "10.40.40.1"
 
 # SSH listens only on management VLAN
 ssh_listen_addresses:

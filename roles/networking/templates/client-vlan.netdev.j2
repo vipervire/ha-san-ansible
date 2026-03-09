@@ -1,0 +1,7 @@
+# Managed by Ansible — client VLAN {{ cv.name }} ({{ cv.id }})
+[NetDev]
+Name={{ cv.name }}-vlan
+Kind=vlan
+
+[VLAN]
+Id={{ cv.id }}
