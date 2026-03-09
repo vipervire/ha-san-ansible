@@ -125,7 +125,7 @@ for bs_name in "${!EXISTING_BS[@]}"; do
 
     # Only manage backstores that correspond to our zvol dataset
     # (skip backstores created manually for other purposes)
-    if [ ! -b "$expected_dev" ] && [ -d "${ZVOL_DEV_BASE}" ]; then
+    if [ ! -b "$expected_dev" ]; then
         case "$bs_dev" in
             /dev/zvol/${ZVOL_PARENT}/*)
                 echo "  - Removing stale backstore: ${bs_name} (zvol deleted)"
