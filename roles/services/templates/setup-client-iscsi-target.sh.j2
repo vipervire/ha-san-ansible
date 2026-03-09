@@ -27,15 +27,38 @@ fi
 # ─── Bind portals to iSCSI-enabled client VLAN VIPs ──────────────────────────
 # Portals are bound to VIPs (not 0.0.0.0) so they only respond when VIP is active.
 # Requires net.ipv4.ip_nonlocal_bind=1 so LIO can bind before Pacemaker assigns VIPs.
+# Desired portal IPs (iSCSI-enabled client VLANs only)
+DESIRED_PORTALS=(
 {% for cv in client_vlans %}
 {% if 'iscsi' in cv.services %}
-# Portal for {{ cv.name }} VLAN ({{ cv.vip }})
-if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg1/portals/{{ cv.vip }}:3260 &>/dev/null 2>&1; then
-  targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals create {{ cv.vip }} 3260
-  echo "  + Created portal {{ cv.vip }}:3260 ({{ cv.name }})"
-fi
+  "{{ cv.vip }}"
 {% endif %}
 {% endfor %}
+)
+
+# Add missing portals
+for vip in "${DESIRED_PORTALS[@]}"; do
+  if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg1/portals/"${vip}":3260 &>/dev/null 2>&1; then
+    targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals create "${vip}" 3260
+    echo "  + Created portal ${vip}:3260"
+  fi
+done
+
+# Remove stale portals (IPs no longer in an iSCSI-enabled VLAN)
+while IFS= read -r portal_ip; do
+  [ -n "$portal_ip" ] || continue
+  found=false
+  for vip in "${DESIRED_PORTALS[@]}"; do
+    if [ "$vip" = "$portal_ip" ]; then
+      found=true
+      break
+    fi
+  done
+  if [ "$found" = "false" ]; then
+    echo "  - Removing stale portal ${portal_ip}:3260"
+    targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals delete "${portal_ip}" 3260
+  fi
+done < <(targetcli ls /iscsi/"${TARGET_IQN}"/tpg1/portals/ 2>/dev/null | grep -oP '(?<=o- )\d+\.\d+\.\d+\.\d+' || true)
 
 {% if iscsi_client_chap_enabled | default(false) %}
 # Enable CHAP authentication
