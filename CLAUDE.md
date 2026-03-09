@@ -198,6 +198,8 @@ When modifying Cockpit, NFS, or SMB configurations:
   - `/etc/exports` → `/san-pool/cluster-config/nfs/exports`
   - `/etc/samba/smb.conf` → `/san-pool/cluster-config/samba/smb.conf`
   - `/var/lib/samba/private/` → `/san-pool/cluster-config/samba/private/`
+- **Shared config (not symlinked — read by sync script):**
+  - `/san-pool/cluster-config/iscsi/acls.conf` — iSCSI initiator ACL list (one IQN per line)
 - **Cockpit VIP:** 10.20.20.10 (management VLAN) follows active node
 - **Managed by Pacemaker:** Cockpit service is part of san-resources group
 - **Documentation:** `docs/cockpit-ha-config.md` for detailed configuration and troubleshooting
@@ -206,6 +208,33 @@ When modifying Cockpit, NFS, or SMB configurations:
 - Always edit the shared storage location, not the symlink target
 - Example: `vim /san-pool/cluster-config/nfs/exports` (correct)
 - NOT: `vim /etc/exports` (works but less obvious it's on shared storage)
+
+### 3a. iSCSI LUN Auto-Sync (Client-Facing Target)
+
+**Problem:** LIO backstore-to-LUN mappings are stored in `/etc/rtslib-fb-target/saveconfig.json` — a node-local file. Zvols created after initial setup (via Houston Cockpit, ZFS-over-iSCSI Proxmox plugin, or manual `zfs create -V`) only get LUN mappings on the node where they were created. On failover, the other node doesn't know about the new LUNs.
+
+**Solution:** The `sync-iscsi-luns` Pacemaker resource runs after every pool import and auto-discovers zvols under `san-pool/iscsi/`, mapping any unmapped zvols as LIO backstores + LUNs and cleaning up stale backstores for deleted zvols.
+
+**Resource ordering:**
+```
+zfs-pool → iscsi-group (sync-iscsi-luns → vip-iscsi) → Proxmox/k3s reconnect
+```
+
+**Files:**
+- `roles/services/templates/sync-iscsi-luns.sh.j2` — auto-discover script
+- `roles/services/templates/sync-iscsi-luns.service.j2` — systemd oneshot for Pacemaker
+- `roles/pacemaker/templates/configure-resources.sh.j2` — `iscsi-group` resource group
+
+**Configuration:** `iscsi_client_zvol_dataset` (default: `iscsi`) in `roles/services/defaults/main.yml` controls which dataset is scanned. All zvols directly under `san-pool/<dataset>/` are auto-mapped.
+
+**When creating new zvols for iSCSI clients:**
+- Create the zvol under `san-pool/iscsi/` using any method (Houston, CLI, plugin)
+- The next failover (or manual `bash /root/sync-iscsi-luns.sh`) maps it as a LUN
+- No need to re-run Ansible or manually configure targetcli on both nodes
+
+**ACL sync:** Initiator ACLs are also synced from `/san-pool/cluster-config/iscsi/acls.conf` (one IQN per line). The file is seeded by `setup-client-iscsi-target.sh` from `iscsi_client_acls` and can be edited directly on shared storage. Phase 3 of the sync script adds missing ACLs and removes stale ones. To add a new initiator without re-running Ansible:
+1. Edit `/san-pool/cluster-config/iscsi/acls.conf` — add the IQN
+2. Run `bash /root/sync-iscsi-luns.sh` (or wait for next failover)
 
 ### 4. Monitoring Changes
 
@@ -577,6 +606,9 @@ ssh storage-b 'zpool status san-pool'
 
 ## Change Log
 
+- **2026-03-08**: Optimized `sync-iscsi-luns.sh` — replaced per-item `targetcli ls` existence checks and individual write spawns with (1) a single `python3` invocation that parses `saveconfig.json` into bash associative arrays, and (2) a single batched `targetcli` stdin invocation for all changes. Reduces ~40 process spawns (15 zvols + 5 ACLs) to exactly 2 — expected runtime <5s vs previous 30–90s.
+- **2026-03-06**: Added LIO ACL sync — `sync-iscsi-luns.sh` Phase 3 reads `/san-pool/cluster-config/iscsi/acls.conf` (one IQN per line) and ensures ACLs match on whichever node is active. `setup-client-iscsi-target.sh` seeds the file from `iscsi_client_acls`. Operators can edit the shared file directly without re-running Ansible.
+- **2026-03-06**: Added iSCSI LUN auto-sync — `sync-iscsi-luns` Pacemaker resource auto-discovers zvols under `san-pool/iscsi/` after pool import and maps them as LIO LUNs. Handles zvols created by any method (Houston Cockpit, ZFS-over-iSCSI Proxmox plugin, manual `zfs create -V`). Cleans up stale backstores for deleted zvols. New `iscsi-group` resource group orders sync before `vip-iscsi`. Existing clusters must re-run `configure-pacemaker-resources.sh` and remove the old standalone `vip-iscsi` constraint.
 - **2026-03-05**: Added `hwtemp-exporter` — NIC chip (sysfs hwmon), SFP/QSFP transceiver (ethtool), and HBA controller (FC + SAS allowlist) temperature monitoring; optional Mellanox MFT install (`mellanox_mft_install: false` opt-in) for ConnectX-3 mlx4 cards without hwmon; 5 new Prometheus alert rules (NICTemperatureHigh/Critical, SFPTemperatureHigh, HBATemperatureHigh, HWTempExporterFailed); MFT GPG fingerprint pinned in `group_vars/all.yml`
 - **2026-03-04**: Added Ubuntu 22.04/24.04 and AlmaLinux 9 support — two-layer dispatch pattern (OS-family vars + distribution overrides), Ubuntu-specific files for ZFS (native modules, no DKMS), hardening (ufw disabled → nftables), monitoring (ha_cluster_exporter unavailable notice), pacemaker (kasa pip fallback), cockpit (45Drives opt-in); AlmaLinux uses existing RedHat.yml files unchanged; OS validation assertion added to site.yml; `docs/ubuntu-notes.md` added
 - **2026-03-04**: Added per-node watchdog overrides — any `watchdog_*` variable can be set in `host_vars/<node>.yml` to use a different module or settings per node (e.g. `iTCO_wdt` on storage-a, `softdog` on storage-b); added commented examples to `host_vars/storage-{a,b}.yml` and per-node configuration section in `docs/watchdog.md`

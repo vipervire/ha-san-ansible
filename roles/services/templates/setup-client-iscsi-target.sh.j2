@@ -52,5 +52,24 @@ fi
 {% endfor %}
 {% endif %}
 
+# ─── Seed ACL list on shared storage for failover sync ──────────────────────
+# sync-iscsi-luns.sh reads this file after pool import to recreate ACLs on
+# whichever node becomes active. One IQN per line. Edit this file (not
+# targetcli) to add/remove initiators — changes take effect on next failover
+# or manual sync run.
+ACLS_DIR="/{{ zfs_pool_name }}/cluster-config/iscsi"
+ACLS_FILE="${ACLS_DIR}/acls.conf"
+mkdir -p "${ACLS_DIR}"
+cat > "${ACLS_FILE}" <<'ACLS_EOF'
+# Managed by Ansible — client iSCSI initiator ACLs
+# One IQN per line. Edit to add/remove initiators.
+# Changes apply on next failover or: bash /root/sync-iscsi-luns.sh
+{% for initiator_iqn in iscsi_client_acls %}
+{{ initiator_iqn }}
+{% endfor %}
+ACLS_EOF
+chmod 0640 "${ACLS_FILE}"
+echo "ACL list seeded at ${ACLS_FILE}"
+
 targetcli saveconfig
 echo "=== Client iSCSI target configured successfully ==="

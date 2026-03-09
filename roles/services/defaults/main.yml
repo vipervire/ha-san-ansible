@@ -20,3 +20,9 @@ smb_encrypt: "required"
 iscsi_client_chap_enabled: false
 iscsi_client_chap_user: ""
 iscsi_client_chap_password: ""
+
+# iSCSI LUN auto-sync — dataset under which zvols are auto-mapped as LUNs.
+# All zvols directly under <pool>/<dataset>/ are discovered and exported.
+# Zvols can be created by any method: Houston Cockpit UI, ZFS-over-iSCSI
+# Proxmox plugin, manual 'zfs create -V', or Ansible.
+iscsi_client_zvol_dataset: "iscsi"
