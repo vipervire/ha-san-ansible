@@ -1,11 +1,10 @@
-# Managed by Ansible — client interface configuration
-# Client VLAN {{ cv.name }} ({{ cv.id }}): {{ cv.description | default(cv.services | join(', ')) }}
+# Managed by Ansible — client VLAN {{ cv.name }} ({{ cv.id }})
+# {{ cv.description | default(cv.services | join(', ')) }}
 [Match]
-Name={{ cv.parent_interface | default(net_client_parent) }}
+Name={{ cv.name }}-vlan
 
 [Network]
 Address={{ client_ips[cv.name] }}/{{ cv.subnet.split('/')[1] }}
-VLAN={{ cv.name }}-vlan
 
 [Link]
 MTUBytes={{ cv.mtu | default(9000) }}

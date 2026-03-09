@@ -68,10 +68,44 @@
     - inventory_hostname in groups['storage_nodes']
   notify: restart networkd
 
-- name: Deploy client interface configs (one per client VLAN)
+- name: Gather unique client parent interfaces
+  ansible.builtin.set_fact:
+    _client_parent_ifaces: "{{ client_vlans | map(attribute='parent_interface', default=net_client_parent) | unique | list }}"
+  when:
+    - networking_manage | default(false)
+    - inventory_hostname in groups['storage_nodes']
+
+- name: Deploy client parent interface configs (one per physical NIC)
+  ansible.builtin.template:
+    src: client-parent.network.j2
+    dest: "/etc/systemd/network/29-client-{{ parent_iface }}.network"
+    mode: "0644"
+  loop: "{{ _client_parent_ifaces }}"
+  loop_control:
+    loop_var: parent_iface
+  when:
+    - networking_manage | default(false)
+    - inventory_hostname in groups['storage_nodes']
+  notify: restart networkd
+
+- name: Deploy client VLAN netdev configs
+  ansible.builtin.template:
+    src: client-vlan.netdev.j2
+    dest: "/etc/systemd/network/3{{ idx }}0-client-{{ cv.name }}.netdev"
+    mode: "0644"
+  loop: "{{ client_vlans }}"
+  loop_control:
+    loop_var: cv
+    index_var: idx
+  when:
+    - networking_manage | default(false)
+    - inventory_hostname in groups['storage_nodes']
+  notify: restart networkd
+
+- name: Deploy client VLAN interface configs
   ansible.builtin.template:
     src: client.network.j2
-    dest: "/etc/systemd/network/3{{ idx }}-client-{{ cv.name }}.network"
+    dest: "/etc/systemd/network/3{{ idx }}1-client-{{ cv.name }}.network"
     mode: "0644"
   loop: "{{ client_vlans }}"
   loop_control:

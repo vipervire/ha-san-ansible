@@ -1,0 +1,22 @@
+# Managed by Ansible — client parent interface ({{ parent_iface }})
+# Declares VLAN subinterfaces for client traffic.
+[Match]
+Name={{ parent_iface }}
+
+[Network]
+{% for cv in client_vlans %}
+{% if (cv.parent_interface | default(net_client_parent)) == parent_iface %}
+VLAN={{ cv.name }}-vlan
+{% endif %}
+{% endfor %}
+
+[Link]
+{% set ns = namespace(max_mtu=1500) %}
+{% for cv in client_vlans %}
+{% if (cv.parent_interface | default(net_client_parent)) == parent_iface %}
+{% if (cv.mtu | default(9000)) | int > ns.max_mtu %}
+{% set ns.max_mtu = (cv.mtu | default(9000)) | int %}
+{% endif %}
+{% endif %}
+{% endfor %}
+MTUBytes={{ ns.max_mtu }}
