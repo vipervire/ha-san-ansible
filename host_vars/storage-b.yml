@@ -5,7 +5,11 @@
 
 storage_ip: "10.10.10.2"
 mgmt_ip: "10.20.20.2"
-client_ip: "10.30.30.2"
+
+# Per-VLAN client IPs — keyed by client_vlans[].name
+client_ips:
+  enduser: "10.30.30.2"
+  hypervisor: "10.40.40.2"
 
 ssh_listen_addresses:
   - "{{ mgmt_ip }}"

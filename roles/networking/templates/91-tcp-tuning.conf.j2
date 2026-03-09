@@ -3,3 +3,6 @@
 {% for key, value in tcp_tunables.items() %}
 {{ key }} = {{ value }}
 {% endfor %}
+
+# Allow binding to VIP addresses before Pacemaker assigns them (required for HA)
+net.ipv4.ip_nonlocal_bind = 1

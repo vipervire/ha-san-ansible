@@ -32,31 +32,19 @@ pcs resource create zfs-pool ocf:heartbeat:ZFS \
   2>/dev/null || \
   pcs resource update zfs-pool pool="{{ zfs_pool_name }}"
 
-# ─── Virtual IPs ───────────────────────────────────────────────────────────
+# ─── Virtual IPs — one per client VLAN ───────────────────────────────────────
 # nic= ensures the VIP binds to the correct VLAN interface. Without it,
 # IPaddr2 auto-detection may pick the wrong interface on multi-VLAN hosts.
-echo "Creating/updating VIP resources"
-pcs resource create vip-nfs ocf:heartbeat:IPaddr2 \
-  ip="{{ vip_nfs }}" cidr_netmask={{ vip_cidr }} \
-  nic="{{ net_client_parent }}.{{ vlans.client.id }}" \
+echo "Creating/updating client VLAN VIP resources"
+{% for cv in client_vlans %}
+pcs resource create vip-{{ cv.name }} ocf:heartbeat:IPaddr2 \
+  ip="{{ cv.vip }}" cidr_netmask={{ cv.vip_cidr }} \
+  nic="{{ cv.parent_interface | default(net_client_parent) }}.{{ cv.id }}" \
   op monitor interval=10s \
   2>/dev/null || \
-  pcs resource update vip-nfs ip="{{ vip_nfs }}" cidr_netmask={{ vip_cidr }} nic="{{ net_client_parent }}.{{ vlans.client.id }}"
+  pcs resource update vip-{{ cv.name }} ip="{{ cv.vip }}" cidr_netmask={{ cv.vip_cidr }} nic="{{ cv.parent_interface | default(net_client_parent) }}.{{ cv.id }}"
 
-pcs resource create vip-smb ocf:heartbeat:IPaddr2 \
-  ip="{{ vip_smb }}" cidr_netmask={{ vip_cidr }} \
-  nic="{{ net_client_parent }}.{{ vlans.client.id }}" \
-  op monitor interval=10s \
-  2>/dev/null || \
-  pcs resource update vip-smb ip="{{ vip_smb }}" cidr_netmask={{ vip_cidr }} nic="{{ net_client_parent }}.{{ vlans.client.id }}"
-
-pcs resource create vip-iscsi ocf:heartbeat:IPaddr2 \
-  ip="{{ vip_iscsi }}" cidr_netmask={{ vip_cidr }} \
-  nic="{{ net_client_parent }}.{{ vlans.client.id }}" \
-  op monitor interval=10s \
-  2>/dev/null || \
-  pcs resource update vip-iscsi ip="{{ vip_iscsi }}" cidr_netmask={{ vip_cidr }} nic="{{ net_client_parent }}.{{ vlans.client.id }}"
-
+{% endfor %}
 # Management VLAN VIP for Cockpit
 pcs resource create vip-cockpit ocf:heartbeat:IPaddr2 \
   ip="{{ vip_cockpit }}" cidr_netmask={{ vip_mgmt_cidr }} \
@@ -83,21 +71,8 @@ pcs resource create cockpit-service systemd:cockpit.socket \
   op monitor interval=30s \
   2>/dev/null || echo "  (cockpit-service already exists)"
 
-# ─── Service groups (VIP + service, ordered within group) ──────────────────
-# Each group starts its VIP first, then its service — independently of other groups.
-# This allows NFS, SMB, and Cockpit to start in parallel after the pool is ready.
-echo "Creating service groups"
-pcs resource group add nfs-group vip-nfs nfs-server \
-  2>/dev/null || echo "  (nfs-group already exists)"
-
-pcs resource group add smb-group vip-smb smb-server \
-  2>/dev/null || echo "  (smb-group already exists)"
-
-pcs resource group add cockpit-group vip-cockpit cockpit-service \
-  2>/dev/null || echo "  (cockpit-group already exists)"
-
 # ─── iSCSI LUN sync (auto-maps zvols to LIO LUNs after pool import) ──────
-# Runs after pool import so /dev/zvol/ entries exist, before vip-iscsi so
+# Runs after pool import so /dev/zvol/ entries exist, before iSCSI VIP so
 # Proxmox/k3s initiators see all LUNs when they reconnect after failover.
 # Handles zvols created by any method: Houston Cockpit, ZFS-over-iSCSI
 # plugin, manual 'zfs create -V', or Ansible.
@@ -107,36 +82,34 @@ pcs resource create sync-iscsi-luns systemd:sync-iscsi-luns \
   op monitor interval=0 \
   2>/dev/null || echo "  (sync-iscsi-luns already exists)"
 
-# Group: sync LUNs, then bring up the iSCSI VIP
-pcs resource group add iscsi-group sync-iscsi-luns vip-iscsi \
-  2>/dev/null || echo "  (iscsi-group already exists)"
+# ─── san-services group (flat: VIPs → sync → services) ──────────────────────
+# VIPs start first (in VLAN order), then iSCSI LUN sync, then NFS/SMB.
+# One group simplifies ordering/colocation — all resources follow zfs-pool.
+echo "Creating san-services group"
+pcs resource group add san-services \
+{% for cv in client_vlans %}
+  vip-{{ cv.name }} \
+{% endfor %}
+  sync-iscsi-luns \
+  nfs-server \
+  smb-server \
+  2>/dev/null || echo "  (san-services group already exists)"
 
-# ─── Ordering: pool must be fully started before any VIP/service group ─────
-# Groups start in parallel after pool — no ordering between groups.
-#
-# NOTE on re-runs: Pacemaker ordering constraints are fully declarative and
-# idempotent — adding the same constraint twice is silently ignored. If you
-# need to REMOVE a constraint (e.g., after renaming a resource group), use:
-#   pcs constraint show --full          # find the constraint ID
-#   pcs constraint remove <id>
+# Cockpit group stays separate (management VLAN)
+pcs resource group add cockpit-group vip-cockpit cockpit-service \
+  2>/dev/null || echo "  (cockpit-group already exists)"
+
+# ─── Ordering: pool must be fully started before any service group ─────────
 echo "Creating ordering constraints"
-pcs constraint order zfs-pool then nfs-group \
-  2>/dev/null || echo "  (order zfs-pool->nfs-group already exists)"
-pcs constraint order zfs-pool then smb-group \
-  2>/dev/null || echo "  (order zfs-pool->smb-group already exists)"
-pcs constraint order zfs-pool then iscsi-group \
-  2>/dev/null || echo "  (order zfs-pool->iscsi-group already exists)"
+pcs constraint order zfs-pool then san-services \
+  2>/dev/null || echo "  (order zfs-pool->san-services already exists)"
 pcs constraint order zfs-pool then cockpit-group \
   2>/dev/null || echo "  (order zfs-pool->cockpit-group already exists)"
 
 # ─── Colocation: all resources must run on the same node as zfs-pool ───────
 echo "Creating colocation constraints"
-pcs constraint colocation add nfs-group with zfs-pool INFINITY \
-  2>/dev/null || echo "  (colocation nfs-group already exists)"
-pcs constraint colocation add smb-group with zfs-pool INFINITY \
-  2>/dev/null || echo "  (colocation smb-group already exists)"
-pcs constraint colocation add iscsi-group with zfs-pool INFINITY \
-  2>/dev/null || echo "  (colocation iscsi-group already exists)"
+pcs constraint colocation add san-services with zfs-pool INFINITY \
+  2>/dev/null || echo "  (colocation san-services already exists)"
 pcs constraint colocation add cockpit-group with zfs-pool INFINITY \
   2>/dev/null || echo "  (colocation cockpit-group already exists)"
 

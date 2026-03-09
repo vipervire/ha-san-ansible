@@ -5,13 +5,12 @@
 set -euo pipefail
 
 TARGET_IQN="{{ iscsi_client_iqn }}"
-BIND_IP="{{ iscsi_client_bind_ip | default(client_ip) }}"
 
 echo "=== Configuring client iSCSI target: ${TARGET_IQN} ==="
 
 # Check if target already exists
 if targetcli ls /iscsi/"${TARGET_IQN}" &>/dev/null 2>&1; then
-  echo "Target ${TARGET_IQN} already exists — updating ACLs only."
+  echo "Target ${TARGET_IQN} already exists — updating portals and ACLs."
   TARGET_EXISTS=true
 else
   TARGET_EXISTS=false
@@ -21,10 +20,22 @@ if [[ "${TARGET_EXISTS}" == "false" ]]; then
   # Create the iSCSI target
   targetcli /iscsi create "${TARGET_IQN}"
 
-  # Bind to client-facing IP only (remove default 0.0.0.0 portal)
+  # Remove default 0.0.0.0 portal
   targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals delete 0.0.0.0 3260 2>/dev/null || true
-  targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals create "${BIND_IP}" 3260
 fi
+
+# ─── Bind portals to iSCSI-enabled client VLAN VIPs ──────────────────────────
+# Portals are bound to VIPs (not 0.0.0.0) so they only respond when VIP is active.
+# Requires net.ipv4.ip_nonlocal_bind=1 so LIO can bind before Pacemaker assigns VIPs.
+{% for cv in client_vlans %}
+{% if 'iscsi' in cv.services %}
+# Portal for {{ cv.name }} VLAN ({{ cv.vip }})
+if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg1/portals/{{ cv.vip }}:3260 &>/dev/null 2>&1; then
+  targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals create {{ cv.vip }} 3260
+  echo "  + Created portal {{ cv.vip }}:3260 ({{ cv.name }})"
+fi
+{% endif %}
+{% endfor %}
 
 {% if iscsi_client_chap_enabled | default(false) %}
 # Enable CHAP authentication

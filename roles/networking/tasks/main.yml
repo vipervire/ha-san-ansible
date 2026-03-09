@@ -68,11 +68,24 @@
     - inventory_hostname in groups['storage_nodes']
   notify: restart networkd
 
-- name: Deploy client interface config
+- name: Deploy client interface configs (one per client VLAN)
   ansible.builtin.template:
     src: client.network.j2
-    dest: /etc/systemd/network/30-client.network
+    dest: "/etc/systemd/network/3{{ idx }}-client-{{ cv.name }}.network"
     mode: "0644"
+  loop: "{{ client_vlans }}"
+  loop_control:
+    loop_var: cv
+    index_var: idx
+  when:
+    - networking_manage | default(false)
+    - inventory_hostname in groups['storage_nodes']
+  notify: restart networkd
+
+- name: Remove legacy single-VLAN client network config
+  ansible.builtin.file:
+    path: /etc/systemd/network/30-client.network
+    state: absent
   when:
     - networking_manage | default(false)
     - inventory_hostname in groups['storage_nodes']

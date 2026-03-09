@@ -21,12 +21,26 @@ table inet filter {
     # ─── Storage VLAN ({{ vlans.storage.id }}) — iSCSI from peer only ───
     ip saddr {{ vlans.storage.subnet }} tcp dport 3260 accept
 
-    # ─── Client VLAN ({{ vlans.client.id }}) — NFS, SMB, iSCSI ─────────
-    ip saddr {{ vlans.client.subnet }} tcp dport { 2049, 3260, 445 } accept
+    # ─── Client VLANs — per-VLAN service filtering ──────────────────────
+{% for cv in client_vlans %}
+    # {{ cv.name }} (VLAN {{ cv.id }}): {{ cv.services | join(', ') }}
+{% if 'nfs' in cv.services %}
+    ip saddr {{ cv.subnet }} tcp dport 2049 accept
 {% if nfs_v3_enabled | default(false) %}
-    ip saddr {{ vlans.client.subnet }} tcp dport { 20048, 111 } accept
-    ip saddr {{ vlans.client.subnet }} udp dport 111 accept
+    ip saddr {{ cv.subnet }} tcp dport { 20048, 111 } accept
+    ip saddr {{ cv.subnet }} udp dport 111 accept
 {% endif %}
+{% endif %}
+{% if 'smb' in cv.services %}
+    ip saddr {{ cv.subnet }} tcp dport 445 accept
+{% endif %}
+{% if 'iscsi' in cv.services %}
+    ip saddr {{ cv.subnet }} tcp dport 3260 accept
+{% endif %}
+{% if 'ssh' in cv.services %}
+    ip saddr {{ cv.subnet }} tcp dport {{ ssh_port }} accept
+{% endif %}
+{% endfor %}
 {% endif %}
 
     # ─── Management VLAN ({{ vlans.management.id }}) ────────────────────

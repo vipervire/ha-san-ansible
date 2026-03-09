@@ -4,8 +4,8 @@
     workgroup = {{ smb_workgroup }}
     server string = {{ smb_server_string }}
 
-    # Bind to VIP only
-    interfaces = {{ smb_bind_ip }}
+    # Bind to client VLAN VIPs where SMB is enabled
+    interfaces = {{ client_vlans | selectattr('services', 'contains', 'smb') | map(attribute='vip') | join(' ') }}
     bind interfaces only = yes
 
     # Security — SMB3 minimum, signing + encryption required

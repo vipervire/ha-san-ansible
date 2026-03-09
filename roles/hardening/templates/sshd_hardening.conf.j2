@@ -4,6 +4,14 @@
 ListenAddress {{ addr }}
 {% endfor %}
 {% endif %}
+{% if inventory_hostname in groups.get('storage_nodes', []) %}
+{% for cv in client_vlans | default([]) %}
+{% if 'ssh' in cv.services %}
+# SSH on {{ cv.name }} VLAN for Proxmox ZFS-over-iSCSI
+ListenAddress {{ cv.vip }}
+{% endif %}
+{% endfor %}
+{% endif %}
 
 Port {{ ssh_port }}
 PermitRootLogin no

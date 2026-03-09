@@ -1,0 +1,6 @@
+# Managed by Ansible — bind Cockpit to management VLAN only
+[Socket]
+ListenStream=
+ListenStream={{ mgmt_ip }}:9090
+ListenStream={{ vip_cockpit }}:9090
+FreeBind=yes

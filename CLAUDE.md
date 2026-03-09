@@ -116,10 +116,15 @@ ansible-playbook -i inventory.yml os-upgrade.yml --tags post-upgrade --limit sto
 | Management | 9664/tcp | ha_cluster_exporter |
 | Storage (10.10.10.0/24) | 3260/tcp | iSCSI (backend replication) |
 | Storage | 5405/udp | Corosync ring1 (storage nodes only) |
-| Client (10.30.30.0/24) | 2049, 20048/tcp | NFS |
-| Client | 111/tcp+udp | NFS portmapper |
-| Client | 445/tcp | SMB |
-| Client | 3260/tcp | iSCSI (client-facing target) |
+| Client VLANs (per `client_vlans`) | Per-VLAN, based on `services` list | See below |
+
+**Per-VLAN service → port mapping** (firewall rules auto-generated from `client_vlans[].services`):
+| Service | Ports |
+|---------|-------|
+| `nfs` | 2049/tcp (+ 20048, 111 if `nfs_v3_enabled`) |
+| `smb` | 445/tcp |
+| `iscsi` | 3260/tcp |
+| `ssh` | 22/tcp (for Proxmox ZFS-over-iSCSI plugin) |
 
 **Common scenarios requiring firewall updates:**
 
@@ -201,7 +206,8 @@ When modifying Cockpit, NFS, or SMB configurations:
 - **Shared config (not symlinked — read by sync script):**
   - `/san-pool/cluster-config/iscsi/acls.conf` — iSCSI initiator ACL list (one IQN per line)
 - **Cockpit VIP:** 10.20.20.10 (management VLAN) follows active node
-- **Managed by Pacemaker:** Cockpit service is part of san-resources group
+- **Cockpit listen binding:** Socket drop-in (`cockpit.socket.d/listen.conf`) binds to `mgmt_ip:9090` and `vip_cockpit:9090` only (defense-in-depth; firewall also restricts)
+- **Managed by Pacemaker:** Cockpit service is part of cockpit-group
 - **Documentation:** `docs/cockpit-ha-config.md` for detailed configuration and troubleshooting
 
 **When editing NFS/SMB configs manually:**
@@ -217,13 +223,14 @@ When modifying Cockpit, NFS, or SMB configurations:
 
 **Resource ordering:**
 ```
-zfs-pool → iscsi-group (sync-iscsi-luns → vip-iscsi) → Proxmox/k3s reconnect
+zfs-pool → san-services (vip-enduser → vip-hypervisor → sync-iscsi-luns → nfs-server → smb-server)
+zfs-pool → cockpit-group (vip-cockpit → cockpit-service)
 ```
 
 **Files:**
 - `roles/services/templates/sync-iscsi-luns.sh.j2` — auto-discover script
 - `roles/services/templates/sync-iscsi-luns.service.j2` — systemd oneshot for Pacemaker
-- `roles/pacemaker/templates/configure-resources.sh.j2` — `iscsi-group` resource group
+- `roles/pacemaker/templates/configure-resources.sh.j2` — `san-services` resource group
 
 **Configuration:** `iscsi_client_zvol_dataset` (default: `iscsi`) in `roles/services/defaults/main.yml` controls which dataset is scanned. All zvols directly under `san-pool/<dataset>/` are auto-mapped.
 
@@ -271,13 +278,13 @@ smart_monitoring_enabled: true        # toggles S.M.A.R.T disk health exporter
 
 **Per-node settings** (`host_vars/<hostname>.yml`):
 - Disk layouts (`local_data_disks`) — must use stable `/dev/disk/by-id/` paths, never `/dev/sdX`
-- IP addresses (`mgmt_ip`, `storage_ip`, `client_ip`)
+- IP addresses (`mgmt_ip`, `storage_ip`, `client_ips` dict keyed by VLAN name)
 - iSCSI IQNs (`iscsi_target_iqn`, `iscsi_initiator_name`, `iscsi_peer_ip`, `iscsi_peer_iqn`)
 - Optional `zfs_arc_max` override (otherwise computed as 50% of RAM at deploy time)
 - Optional `slog_disk` and `special_disk` for NVMe SLOG/special vdevs
 
 **Global settings** (`group_vars/all.yml`):
-- VLAN configuration, VIPs (`vip_nfs`, `vip_smb`, `vip_iscsi`, `vip_cockpit`)
+- VLAN configuration, `client_vlans` list (VIPs, subnets, per-VLAN services), `vip_cockpit`
 - Cluster name and Corosync node list
 - Corosync tuning (`corosync_token`, `corosync_consensus`, etc.)
 - Monitoring flags (`ha_cluster_monitoring_enabled`, ports)
@@ -528,7 +535,7 @@ All nodes must have synchronized clocks (chrony is deployed by the `common` role
 
 - **Management VLAN (10.20.20.0/24):** SSH: 22, Corosync: 5405/udp, pcsd: 2224, Cockpit: 9090, node_exporter: 9100, ha_cluster_exporter: 9664
 - **Storage VLAN (10.10.10.0/24):** iSCSI (backend): 3260, Corosync ring1: 5405/udp
-- **Client VLAN (10.30.30.0/24):** NFS: 2049, 20048, 111, SMB: 445, iSCSI (client): 3260
+- **Client VLANs:** Per-VLAN rules from `client_vlans[].services` — nfs→2049, smb→445, iscsi→3260, ssh→22
 
 ## Full Deployment Workflow
 
@@ -583,9 +590,9 @@ curl http://10.20.20.1:9664/metrics | grep ha_cluster
 pcs status
 
 # 2. Planned failover (graceful migration)
-pcs resource move san-resources storage-b
+pcs resource move san-services storage-b
 # Wait for resources to come up on storage-b
-pcs resource clear san-resources  # remove location constraint
+pcs resource clear san-services  # remove location constraint
 
 # 3. Verify resources on new node
 ssh storage-b 'pcs status'
@@ -603,6 +610,8 @@ ssh storage-b 'zpool status san-pool'
 
 ## Change Log
 
+- **2026-03-09**: Multi-VLAN client networks — replaced single `vlans.client` / `vip_nfs` / `vip_smb` / `vip_iscsi` with `client_vlans` list (per-VLAN VIP, subnet, services). Per-node `client_ip` → `client_ips` dict. Flat `san-services` Pacemaker group replaces per-service groups. Per-VLAN nftables rules auto-generated from `services` list. iSCSI portals bound to VIPs. SSH on client VLANs for Proxmox. `fence_check` pings all client IPs. `ip_nonlocal_bind=1` sysctl for HA VIP binding.
+- **2026-03-09**: Cockpit management binding — systemd socket drop-in binds `cockpit.socket` to `mgmt_ip:9090` + `vip_cockpit:9090` only (defense-in-depth).
 - **2026-03-06**: Added LIO ACL sync — `sync-iscsi-luns.sh` Phase 3 reads `/san-pool/cluster-config/iscsi/acls.conf` (one IQN per line) and ensures ACLs match on whichever node is active. `setup-client-iscsi-target.sh` seeds the file from `iscsi_client_acls`. Operators can edit the shared file directly without re-running Ansible.
 - **2026-03-06**: Added iSCSI LUN auto-sync — `sync-iscsi-luns` Pacemaker resource auto-discovers zvols under `san-pool/iscsi/` after pool import and maps them as LIO LUNs. Handles zvols created by any method (Houston Cockpit, ZFS-over-iSCSI Proxmox plugin, manual `zfs create -V`). Cleans up stale backstores for deleted zvols. New `iscsi-group` resource group orders sync before `vip-iscsi`. Existing clusters must re-run `configure-pacemaker-resources.sh` and remove the old standalone `vip-iscsi` constraint.
 - **2026-03-04**: Added Ubuntu 22.04/24.04 and AlmaLinux 9 support — two-layer dispatch pattern (OS-family vars + distribution overrides), Ubuntu-specific files for ZFS (native modules, no DKMS), hardening (ufw disabled → nftables), monitoring (ha_cluster_exporter unavailable notice), pacemaker (kasa pip fallback), cockpit (45Drives opt-in); AlmaLinux uses existing RedHat.yml files unchanged; OS validation assertion added to site.yml; `docs/ubuntu-notes.md` added

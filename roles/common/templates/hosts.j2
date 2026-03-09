@@ -14,7 +14,7 @@
 {% endif %}
 {% endfor %}
 
-# Floating VIPs
-{{ vip_nfs }}       san-nfs
-{{ vip_smb }}       san-smb
-{{ vip_iscsi }}     san-iscsi
+# Floating VIPs — client VLANs
+{% for cv in client_vlans %}
+{{ cv.vip }}       san-{{ cv.name }}
+{% endfor %}
