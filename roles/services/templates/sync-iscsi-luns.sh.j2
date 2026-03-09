@@ -149,7 +149,12 @@ if [ -f "${ACLS_FILE}" ]; then
     # Build a lookup set for O(1) desired IQN checks
     declare -A DESIRED_SET
     for iqn in "${DESIRED_IQNS[@]}"; do
-        [ -n "$iqn" ] && DESIRED_SET["$iqn"]=1
+        [ -n "$iqn" ] || continue
+        if [[ ! "$iqn" =~ ^iqn\.[0-9]{4}-[0-9]{2}\. ]]; then
+            echo "  WARNING: skipping invalid IQN in ${ACLS_FILE}: ${iqn}"
+            continue
+        fi
+        DESIRED_SET["$iqn"]=1
     done
 
     # Add missing ACLs
