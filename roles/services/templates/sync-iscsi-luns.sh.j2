@@ -160,7 +160,7 @@ if [ -f "${ACLS_FILE}" ]; then
     # Add missing ACLs
     for iqn in "${DESIRED_IQNS[@]}"; do
         [ -n "$iqn" ] || continue
-        if [[ ! "${EXISTING_ACLS[$iqn]+_}" ]]; then
+        if [[ "${DESIRED_SET[$iqn]+_}" ]] && [[ ! "${EXISTING_ACLS[$iqn]+_}" ]]; then
             echo "  + Adding ACL: ${iqn}"
             COMMANDS+=("${TPG_ACLS} create ${iqn}")
         fi
