@@ -165,8 +165,25 @@ for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
         expected_dev="${zvol_dev_base}/${zvol_name}"
         bs_dev="${EXISTING_BS[$bs_name]}"
         if [ ! -b "$expected_dev" ] && [[ "$bs_dev" == /dev/zvol/${zvol_parent}/* ]]; then
-            echo "  - Removing stale backstore: ${bs_name} (zvol deleted)"
-            COMMANDS+=("/backstores/block delete ${bs_name}")
+            # Guard against silent batch failure: targetcli batch mode returns exit code 0
+            # even when a delete is rejected internally (e.g. backstore still has active
+            # LUN mappings). Check EXISTING_LUNS before queuing so the operator sees a
+            # clear message instead of a misleading "LIO configuration saved" with the
+            # backstore still present.
+            bs_has_lun=false
+            for lun_key in "${!EXISTING_LUNS[@]}"; do
+                if [[ "$lun_key" == *":${bs_name}" ]]; then
+                    bs_has_lun=true
+                    break
+                fi
+            done
+            if [ "$bs_has_lun" = "true" ]; then
+                echo "  ! Skipping stale backstore ${bs_name}: active LUN mappings exist."
+                echo "    Remove LUN mappings manually, then re-run: bash /root/sync-iscsi-luns.sh"
+            else
+                echo "  - Removing stale backstore: ${bs_name} (zvol deleted, no active LUNs)"
+                COMMANDS+=("/backstores/block delete ${bs_name}")
+            fi
         fi
     done
 done
@@ -193,7 +210,7 @@ for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
     unset DESIRED_SET; declare -A DESIRED_SET
     for iqn in "${DESIRED_IQNS[@]}"; do
         [ -n "$iqn" ] || continue
-        if [[ ! "$iqn" =~ ^iqn\.[0-9]{4}-[0-9]{2}\. ]]; then
+        if [[ ! "$iqn" =~ ^iqn\.[0-9]{4}-[0-9]{2}\.[a-zA-Z0-9][-a-zA-Z0-9.]*:[a-zA-Z0-9._:-]+$ ]]; then
             echo "  WARNING: skipping invalid IQN in ${acl_file}: ${iqn}"
             continue
         fi
