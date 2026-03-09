@@ -4,5 +4,8 @@
 {{ key }} = {{ value }}
 {% endfor %}
 
-# Allow binding to VIP addresses before Pacemaker assigns them (required for HA)
+# Allow binding to VIP addresses before Pacemaker assigns them (required for HA).
+# This is a global sysctl — all processes can bind to non-local addresses, not just
+# Pacemaker-managed services. This is the standard approach for HA VIP scenarios
+# (iSCSI portals, sshd, Cockpit all need to bind before the VIP is assigned).
 net.ipv4.ip_nonlocal_bind = 1
