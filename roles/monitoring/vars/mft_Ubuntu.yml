@@ -1,0 +1,5 @@
+---
+# roles/monitoring/vars/mft_Ubuntu.yml — Mellanox MFT repo config overrides for Ubuntu
+# Inherits _mft_repo_url, _mft_keyring_path, _mft_packages from mft_Debian.yml
+
+_mft_os_path: "ubuntu{{ ansible_distribution_version }}"

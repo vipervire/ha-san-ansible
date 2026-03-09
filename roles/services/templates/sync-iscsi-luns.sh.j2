@@ -18,19 +18,76 @@ set -euo pipefail
 TARGET_IQN="{{ iscsi_client_iqn }}"
 ZVOL_PARENT="{{ zfs_pool_name }}/{{ iscsi_client_zvol_dataset | default('iscsi') }}"
 ZVOL_DEV_BASE="/dev/zvol/${ZVOL_PARENT}"
-CHANGED=0
 
 echo "=== Syncing iSCSI LUNs for target: ${TARGET_IQN} ==="
 echo "    Scanning zvols under: ${ZVOL_PARENT}"
 
-# Verify the target exists (created by setup-client-iscsi-target.sh)
-if ! targetcli ls /iscsi/"${TARGET_IQN}" &>/dev/null 2>&1; then
+# ─── Read existing LIO state (one python3 invocation, zero targetcli spawns) ──
+# Each 'targetcli' spawn costs 1-3s (Python init + rtslib load). Parsing
+# saveconfig.json directly avoids N spawns for existence checks.
+#
+# Output format:
+#   TARGET_EXISTS|<0|1>
+#   BS|<backstore-name>|<dev-path>      (one per block backstore)
+#   ACL|<initiator-iqn>                 (one per ACL on our target's tpg1)
+
+declare -A EXISTING_BS    # backstore name → device path
+declare -A EXISTING_ACLS  # initiator IQN → 1
+TARGET_EXISTS=0
+
+while IFS='|' read -r _type _key _val; do
+    case "$_type" in
+        TARGET_EXISTS) TARGET_EXISTS="$_key" ;;
+        BS)            EXISTING_BS["$_key"]="$_val" ;;
+        ACL)           EXISTING_ACLS["$_key"]=1 ;;
+    esac
+done < <(ISCSI_TARGET="${TARGET_IQN}" python3 - << 'PYEOF'
+import json, sys, os
+
+saveconfig = '/etc/rtslib-fb-target/saveconfig.json'
+target_iqn = os.environ.get('ISCSI_TARGET', '')
+
+if not os.path.exists(saveconfig):
+    print('TARGET_EXISTS|0')
+    sys.exit(0)
+
+with open(saveconfig) as f:
+    config = json.load(f)
+
+target_found = False
+for t in config.get('targets', []):
+    if t.get('wwn') == target_iqn and t.get('fabric') == 'iscsi':
+        target_found = True
+        for tpg in t.get('tpgs', []):
+            for acl in tpg.get('node_acls', []):
+                iqn = acl.get('node_wwn', '')
+                if iqn:
+                    print('ACL|' + iqn)
+        break
+
+print('TARGET_EXISTS|1' if target_found else 'TARGET_EXISTS|0')
+
+for bs in config.get('storage_objects', []):
+    if bs.get('plugin') == 'block':
+        name = bs.get('name', '')
+        dev = bs.get('dev', '')
+        if name:
+            print('BS|' + name + '|' + dev)
+PYEOF
+)
+
+# Verify the target exists (must have been created by setup-client-iscsi-target.sh)
+if [ "$TARGET_EXISTS" != "1" ]; then
     echo "ERROR: iSCSI target ${TARGET_IQN} does not exist."
     echo "       Run /root/setup-client-iscsi-target.sh first."
     exit 1
 fi
 
-# ─── Phase 1: Add backstores + LUN mappings for new zvols ─────────────────
+# ─── Collect all changes; apply in a single targetcli batch ───────────────────
+# Reduces N separate process spawns (one per zvol/ACL) to exactly 1.
+COMMANDS=()
+
+# ─── Phase 1: Add backstores + LUN mappings for new zvols ─────────────────────
 
 # Find all zvols (block devices) under the iSCSI dataset.
 # zvols appear as /dev/zvol/<pool>/<dataset>/<name> — skip nested datasets
@@ -42,50 +99,43 @@ if [ -d "${ZVOL_DEV_BASE}" ]; then
 
         zvol_name=$(basename "$zvol_path")
 
-        # Check if backstore already exists
-        if targetcli ls /backstores/block/"${zvol_name}" &>/dev/null 2>&1; then
+        # O(1) associative array lookup — no subprocess
+        if [[ "${EXISTING_BS[$zvol_name]+_}" ]]; then
             continue
         fi
 
         echo "  + Adding backstore: ${zvol_name} → ${zvol_path}"
-        targetcli /backstores/block create "${zvol_name}" "${zvol_path}"
-
-        echo "  + Mapping LUN: ${zvol_name}"
-        targetcli /iscsi/"${TARGET_IQN}"/tpg1/luns create /backstores/block/"${zvol_name}"
-
-        CHANGED=1
+        COMMANDS+=("/backstores/block create ${zvol_name} ${zvol_path}")
+        COMMANDS+=("/iscsi/${TARGET_IQN}/tpg1/luns create /backstores/block/${zvol_name}")
     done
 else
     echo "  (no zvol directory at ${ZVOL_DEV_BASE} — pool may have no iSCSI zvols yet)"
 fi
 
-# ─── Phase 2: Remove stale backstores for deleted zvols ───────────────────
+# ─── Phase 2: Remove stale backstores for deleted zvols ───────────────────────
 # Only remove backstores whose expected zvol path under our managed dataset
 # no longer exists (zvol was deleted via Houston, plugin, or manually).
 # We infer the zvol path from the backstore name: if a backstore is named
 # "vm-disk-01", it was created by Phase 1 pointing at /dev/zvol/<parent>/vm-disk-01.
+# The dev path from saveconfig.json confirms ownership before deleting.
 
-while IFS= read -r bs_name; do
-    [ -n "$bs_name" ] || continue
-
+for bs_name in "${!EXISTING_BS[@]}"; do
+    bs_dev="${EXISTING_BS[$bs_name]}"
     expected_dev="${ZVOL_DEV_BASE}/${bs_name}"
 
     # Only manage backstores that correspond to our zvol dataset
     # (skip backstores created manually for other purposes)
-    if [ ! -b "$expected_dev" ] && [ -d "${ZVOL_DEV_BASE}" ]; then
-        # Verify this backstore actually points to our zvol parent before deleting
-        bs_udev=$(targetcli ls "/backstores/block/${bs_name}" 2>/dev/null | grep -o '/dev/zvol/[^ ]*' || true)
-        case "$bs_udev" in
+    if [ ! -b "$expected_dev" ]; then
+        case "$bs_dev" in
             /dev/zvol/${ZVOL_PARENT}/*)
                 echo "  - Removing stale backstore: ${bs_name} (zvol deleted)"
-                targetcli /backstores/block delete "${bs_name}"
-                CHANGED=1
+                COMMANDS+=("/backstores/block delete ${bs_name}")
                 ;;
         esac
     fi
-done < <(targetcli ls /backstores/block/ 2>/dev/null | grep -oP '(?<=o- )\S+' || true)
+done
 
-# ─── Phase 3: Sync ACLs from shared storage ────────────────────────────────
+# ─── Phase 3: Sync ACLs from shared storage ────────────────────────────────────
 # The authoritative ACL list lives on the ZFS pool so both nodes share it.
 # Seeded by setup-client-iscsi-target.sh; editable by operators on shared
 # storage without re-running Ansible.
@@ -96,40 +146,42 @@ if [ -f "${ACLS_FILE}" ]; then
     # Build list of desired IQNs (skip blanks and comments)
     mapfile -t DESIRED_IQNS < <(grep -v '^\s*#' "${ACLS_FILE}" | grep -v '^\s*$' || true)
 
+    # Build a lookup set for O(1) desired IQN checks
+    declare -A DESIRED_SET
+    for iqn in "${DESIRED_IQNS[@]}"; do
+        [ -n "$iqn" ] || continue
+        if [[ ! "$iqn" =~ ^iqn\.[0-9]{4}-[0-9]{2}\. ]]; then
+            echo "  WARNING: skipping invalid IQN in ${ACLS_FILE}: ${iqn}"
+            continue
+        fi
+        DESIRED_SET["$iqn"]=1
+    done
+
     # Add missing ACLs
     for iqn in "${DESIRED_IQNS[@]}"; do
         [ -n "$iqn" ] || continue
-        if ! targetcli ls "${TPG_ACLS}/${iqn}" &>/dev/null 2>&1; then
+        if [[ "${DESIRED_SET[$iqn]+_}" ]] && [[ ! "${EXISTING_ACLS[$iqn]+_}" ]]; then
             echo "  + Adding ACL: ${iqn}"
-            targetcli "${TPG_ACLS}" create "${iqn}"
-            CHANGED=1
+            COMMANDS+=("${TPG_ACLS} create ${iqn}")
         fi
     done
 
     # Remove stale ACLs (present in LIO but not in acls.conf)
-    while IFS= read -r existing_iqn; do
-        [ -n "$existing_iqn" ] || continue
-        found=false
-        for iqn in "${DESIRED_IQNS[@]}"; do
-            if [ "$iqn" = "$existing_iqn" ]; then
-                found=true
-                break
-            fi
-        done
-        if [ "$found" = "false" ]; then
+    for existing_iqn in "${!EXISTING_ACLS[@]}"; do
+        if [[ ! "${DESIRED_SET[$existing_iqn]+_}" ]]; then
             echo "  - Removing stale ACL: ${existing_iqn}"
-            targetcli "${TPG_ACLS}" delete "${existing_iqn}"
-            CHANGED=1
+            COMMANDS+=("${TPG_ACLS} delete ${existing_iqn}")
         fi
-    done < <(targetcli ls "${TPG_ACLS}" 2>/dev/null | grep -oP '(?<=o- )\S+' || true)
+    done
 else
     echo "  (no ACL file at ${ACLS_FILE} — skipping ACL sync)"
 fi
 
-# ─── Save config if anything changed ─────────────────────────────────────
+# ─── Apply all changes in a single targetcli batch ────────────────────────────
 
-if [ "$CHANGED" -eq 1 ]; then
-    targetcli saveconfig
+if [ ${#COMMANDS[@]} -gt 0 ]; then
+    COMMANDS+=("saveconfig")
+    printf '%s\n' "${COMMANDS[@]}" | targetcli
     echo "=== LIO configuration saved ==="
 else
     echo "=== No changes needed — all LUNs in sync ==="

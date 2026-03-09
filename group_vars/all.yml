@@ -162,6 +162,14 @@ watchdog_enabled: false
 # Verify out-of-band: gpg --with-fingerprint --with-colons /tmp/45drives-gpg.asc
 fortyfive_drives_gpg_fingerprint: "3FBD7E034E80BAF63D5AA9BB98899BBC7318C72B"
 
+# ---------------------------------------------------------------------------
+# Mellanox MFT — GPG key fingerprint
+# ---------------------------------------------------------------------------
+# Pinned fingerprint of the Mellanox package signing key.
+# Used by the monitoring role when mellanox_mft_install: true.
+# Verify out-of-band: gpg --with-fingerprint --with-colons /tmp/mellanox-gpg.asc
+mellanox_gpg_fingerprint: "A9E5 1B76 B89A D4D5 8FAF  1CB4 A80A 7645 41C7 B1D0"
+
 # Rate limiting for Cockpit (9090) and pcsd (2224) — brute-force protection
 firewall_rate_limit_enabled: true
 

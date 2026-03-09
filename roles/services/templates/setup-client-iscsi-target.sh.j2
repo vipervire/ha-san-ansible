@@ -79,7 +79,7 @@ cat > "${ACLS_FILE}" <<'ACLS_EOF'
 {{ initiator_iqn }}
 {% endfor %}
 ACLS_EOF
-chmod 0644 "${ACLS_FILE}"
+chmod 0640 "${ACLS_FILE}"
 echo "ACL list seeded at ${ACLS_FILE}"
 
 targetcli saveconfig

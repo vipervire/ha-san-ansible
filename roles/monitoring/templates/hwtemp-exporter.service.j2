@@ -1,0 +1,17 @@
+# Managed by Ansible — NIC/HBA/SFP temperature metrics exporter service
+[Unit]
+Description=NIC, HBA, and SFP temperature metrics exporter for Prometheus
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/hwtemp-exporter
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hwtemp-exporter
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+# No ProtectSystem=strict — must read /sys and optionally run mget_temp
+ProtectHome=true
+ReadWritePaths=/var/lib/prometheus/node-exporter

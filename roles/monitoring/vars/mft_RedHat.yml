@@ -1,0 +1,9 @@
+---
+# roles/monitoring/vars/mft_RedHat.yml — Mellanox MFT repo config for Rocky/AlmaLinux
+
+_mft_repo_baseurl: >-
+  https://linux.mellanox.com/public/repo/mlnx_ofed/latest/rhel{{ ansible_distribution_version }}/$basearch
+_mft_gpg_key_path: /etc/pki/rpm-gpg/RPM-GPG-KEY-Mellanox
+_mft_packages:
+  - mft
+  - kernel-mft-dkms

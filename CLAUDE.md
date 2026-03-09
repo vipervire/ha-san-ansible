@@ -254,6 +254,7 @@ The monitoring role deploys these exporters on **all cluster nodes** (`hosts: cl
 | `zfs-scrub-exporter` (timer) | 9100 (textfile) | ZFS scrub state/timing | `zfs-scrub-exporter.{sh,service,timer}.j2` |
 | `reboot-required-exporter` (timer) | 9100 (textfile) | Pending reboot flag | `reboot-required-exporter.{sh,service,timer}.j2` |
 | `stonith-probe` (timer, storage nodes only) | 9100 (textfile) | STONITH agent reachability | `stonith-probe.{sh,service,timer}.j2` |
+| `hwtemp-exporter` (timer) | 9100 (textfile) | NIC/HBA/SFP temperatures | `hwtemp-exporter.{sh,service,timer}.j2` |
 
 Textfile exporters write `.prom` files to `/var/lib/prometheus/node-exporter/` for node_exporter to collect.
 
@@ -272,6 +273,8 @@ ha_cluster_monitoring_enabled: true   # toggles ha_cluster_exporter
 # group_vars/storage_nodes/cluster.yml
 zfs_scrub_monitoring_enabled: true    # toggles ZFS scrub exporter
 smart_monitoring_enabled: true        # toggles S.M.A.R.T disk health exporter
+hwtemp_monitoring_enabled: true       # toggles NIC/HBA/SFP temperature exporter (graceful no-op if no hwmon)
+mellanox_mft_install: false           # installs MLNX_OFED MFT for ConnectX-3 chip temps (opt-in)
 ```
 
 ### 5. Per-Node vs. Global Configuration
@@ -612,8 +615,10 @@ ssh storage-b 'zpool status san-pool'
 
 - **2026-03-09**: Multi-VLAN client networks — replaced single `vlans.client` / `vip_nfs` / `vip_smb` / `vip_iscsi` with `client_vlans` list (per-VLAN VIP, subnet, services). Per-node `client_ip` → `client_ips` dict. Flat `san-services` Pacemaker group replaces per-service groups. Per-VLAN nftables rules auto-generated from `services` list. iSCSI portals bound to VIPs. SSH on client VLANs for Proxmox. `fence_check` pings all client IPs. `ip_nonlocal_bind=1` sysctl for HA VIP binding.
 - **2026-03-09**: Cockpit management binding — systemd socket drop-in binds `cockpit.socket` to `mgmt_ip:9090` + `vip_cockpit:9090` only (defense-in-depth).
+- **2026-03-08**: Optimized `sync-iscsi-luns.sh` — replaced per-item `targetcli ls` existence checks and individual write spawns with (1) a single `python3` invocation that parses `saveconfig.json` into bash associative arrays, and (2) a single batched `targetcli` stdin invocation for all changes. Reduces ~40 process spawns (15 zvols + 5 ACLs) to exactly 2 — expected runtime <5s vs previous 30–90s.
 - **2026-03-06**: Added LIO ACL sync — `sync-iscsi-luns.sh` Phase 3 reads `/san-pool/cluster-config/iscsi/acls.conf` (one IQN per line) and ensures ACLs match on whichever node is active. `setup-client-iscsi-target.sh` seeds the file from `iscsi_client_acls`. Operators can edit the shared file directly without re-running Ansible.
 - **2026-03-06**: Added iSCSI LUN auto-sync — `sync-iscsi-luns` Pacemaker resource auto-discovers zvols under `san-pool/iscsi/` after pool import and maps them as LIO LUNs. Handles zvols created by any method (Houston Cockpit, ZFS-over-iSCSI Proxmox plugin, manual `zfs create -V`). Cleans up stale backstores for deleted zvols. New `iscsi-group` resource group orders sync before `vip-iscsi`. Existing clusters must re-run `configure-pacemaker-resources.sh` and remove the old standalone `vip-iscsi` constraint.
+- **2026-03-05**: Added `hwtemp-exporter` — NIC chip (sysfs hwmon), SFP/QSFP transceiver (ethtool), and HBA controller (FC + SAS allowlist) temperature monitoring; optional Mellanox MFT install (`mellanox_mft_install: false` opt-in) for ConnectX-3 mlx4 cards without hwmon; 5 new Prometheus alert rules (NICTemperatureHigh/Critical, SFPTemperatureHigh, HBATemperatureHigh, HWTempExporterFailed); MFT GPG fingerprint pinned in `group_vars/all.yml`
 - **2026-03-04**: Added Ubuntu 22.04/24.04 and AlmaLinux 9 support — two-layer dispatch pattern (OS-family vars + distribution overrides), Ubuntu-specific files for ZFS (native modules, no DKMS), hardening (ufw disabled → nftables), monitoring (ha_cluster_exporter unavailable notice), pacemaker (kasa pip fallback), cockpit (45Drives opt-in); AlmaLinux uses existing RedHat.yml files unchanged; OS validation assertion added to site.yml; `docs/ubuntu-notes.md` added
 - **2026-03-04**: Added per-node watchdog overrides — any `watchdog_*` variable can be set in `host_vars/<node>.yml` to use a different module or settings per node (e.g. `iTCO_wdt` on storage-a, `softdog` on storage-b); added commented examples to `host_vars/storage-{a,b}.yml` and per-node configuration section in `docs/watchdog.md`
 - **2026-03-04**: Added watchdog support — kernel module loading (`watchdog_module`, defaults to `softdog`), boot persistence via `modules-load.d`, optional modprobe options via `watchdog-modprobe.conf.j2`, realtime daemon scheduling, and `docs/watchdog.md` covering hardware/software modules, STONITH relationship, verification, and troubleshooting

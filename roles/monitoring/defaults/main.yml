@@ -13,6 +13,14 @@ smart_monitoring_enabled: true
 # ECC memory monitoring via rasdaemon (not all hardware has ECC)
 ras_monitoring_enabled: false
 
+# NIC/HBA/SFP temperature monitoring (sysfs hwmon + ethtool + optional MFT)
+# Graceful no-op on hardware without hwmon or SFP transceivers.
+hwtemp_monitoring_enabled: true
+
+# Install NVIDIA Mellanox Firmware Tools for ConnectX-3 (mlx4) chip temperature.
+# Required for NIC chip temps on cards without hwmon. Adds MLNX_OFED repo.
+mellanox_mft_install: false
+
 # node_exporter TLS (opt-in)
 node_exporter_tls_enabled: false
 # node_exporter_cert_file: /etc/ssl/certs/node-exporter.crt
