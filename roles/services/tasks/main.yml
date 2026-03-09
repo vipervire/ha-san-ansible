@@ -110,30 +110,22 @@
     state: link
     force: true
 
-# ─── Client-facing iSCSI target (Pacemaker-managed, optional ACLs + CHAP) ──
+# ─── Client-facing iSCSI target (Pacemaker-managed, per-VLAN TPGs) ──────────
+# Triggered when any client VLAN has 'iscsi' in its services list.
+# Each iSCSI-enabled VLAN gets its own TPG with isolated portals, ACLs, and LUNs.
+# Single-VLAN deployments produce one TPG, functionally identical to the old behavior.
 - name: Generate client iSCSI target setup script
   ansible.builtin.template:
     src: setup-client-iscsi-target.sh.j2
     dest: /root/setup-client-iscsi-target.sh
     mode: "0700"
-  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
-- name: Check if client iSCSI target already configured
-  ansible.builtin.command:
-    cmd: targetcli ls /iscsi/{{ iscsi_client_iqn }}
-  register: client_lio_check
-  failed_when: false
-  changed_when: false
-  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
-
-- name: Run client LIO target setup (first time only)
+- name: Run client LIO target setup (always — idempotent, picks up VLAN/TPG changes)
   ansible.builtin.command:
     cmd: /root/setup-client-iscsi-target.sh
-  when:
-    - iscsi_client_acls is defined
-    - iscsi_client_acls | length > 0
-    - client_lio_check.rc is defined
-    - client_lio_check.rc != 0
+  changed_when: true
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
 # ─── iSCSI LUN auto-sync (maps zvols to LUNs on pool import) ────────────
 # Ensures zvols created by any method (Houston Cockpit, ZFS-over-iSCSI
@@ -144,14 +136,14 @@
     src: sync-iscsi-luns.sh.j2
     dest: /root/sync-iscsi-luns.sh
     mode: "0700"
-  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
 - name: Deploy iSCSI LUN sync systemd service
   ansible.builtin.template:
     src: sync-iscsi-luns.service.j2
     dest: /etc/systemd/system/sync-iscsi-luns.service
     mode: "0644"
-  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
   notify: reload systemd
 
 - name: Disable sync-iscsi-luns auto-start (Pacemaker manages this)
@@ -159,4 +151,4 @@
     name: sync-iscsi-luns
     enabled: false
     daemon_reload: true
-  when: iscsi_client_acls is defined and iscsi_client_acls | length > 0
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0

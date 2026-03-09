@@ -239,9 +239,52 @@ zfs-pool → cockpit-group (vip-cockpit → cockpit-service)
 - The next failover (or manual `bash /root/sync-iscsi-luns.sh`) maps it as a LUN
 - No need to re-run Ansible or manually configure targetcli on both nodes
 
-**ACL sync:** Initiator ACLs are also synced from `/san-pool/cluster-config/iscsi/acls.conf` (one IQN per line). The file is seeded by `setup-client-iscsi-target.sh` from `iscsi_client_acls` and can be edited directly on shared storage. Phase 3 of the sync script adds missing ACLs and removes stale ones. To add a new initiator without re-running Ansible:
-1. Edit `/san-pool/cluster-config/iscsi/acls.conf` — add the IQN
+**ACL sync:** Initiator ACLs are synced from per-VLAN `acls-<vlan-name>.conf` files on shared storage. Seeded by `setup-client-iscsi-target.sh`. To add a new initiator without re-running Ansible:
+1. Edit `/san-pool/cluster-config/iscsi/acls-<vlan-name>.conf` — add the IQN
 2. Run `bash /root/sync-iscsi-luns.sh` (or wait for next failover)
+
+### 3b. Per-VLAN iSCSI TPG Isolation
+
+Each iSCSI-enabled client VLAN gets its own LIO Target Portal Group (TPG) with isolated portals, ACLs, and LUN mappings. This provides network-level isolation on top of existing CHAP and IQN ACL controls.
+
+**Single-VLAN deployments:** One VLAN → one TPG (tpg1). Functionally identical to the old behavior. No extra configuration needed.
+
+**Multi-VLAN deployments:** Each VLAN gets its own TPG (tpg1, tpg2, ...) with:
+- One portal bound to that VLAN's VIP
+- Independent ACL list (`acls-<vlan-name>.conf` on shared storage)
+- Independent LUN namespace scoped to `iscsi_dataset`
+
+**Per-VLAN variables** (set in `client_vlans` in `group_vars/all.yml`):
+```yaml
+- name: hypervisor
+  services: [iscsi, ssh]
+  iscsi_acls:            # required when multiple VLANs use iSCSI
+    - "iqn.2025-01.lab.home:proxmox-a"
+  iscsi_dataset: "iscsi/hypervisor"  # required when multiple VLANs use iSCSI
+```
+- `iscsi_acls` — per-VLAN initiator IQN whitelist. Falls back to `iscsi_client_acls` (iscsi.yml) for single-VLAN deployments.
+- `iscsi_dataset` — ZFS dataset to scan for zvols. Falls back to `iscsi_client_zvol_dataset` (default: `iscsi`) for single-VLAN. Sub-datasets must be created in `zfs_datasets` (zfs.yml).
+
+**Multi-VLAN template validation:** If `iscsi_vlans | length > 1`, the Jinja2 template fails clearly if any iSCSI VLAN is missing `iscsi_acls` or `iscsi_dataset`.
+
+**Backstore naming:**
+- Single-VLAN: `<zvol_name>` (unchanged — backward-compatible with existing setups)
+- Multi-VLAN: `<vlan_name>-<zvol_name>` (prevents VMID collisions when multiple Proxmox clusters share the same VMID range)
+
+**Key implementation notes:**
+- `generate_node_acls=0` is set on every TPG — LIO does NOT auto-generate ACLs
+- `setup-client-iscsi-target.sh` always re-runs (idempotent) to pick up VLAN changes
+- `sync-iscsi-luns.sh` Phase 0 bakes in TPG→dataset/VLAN/prefix at Ansible deploy time (no runtime file dependency)
+- ACL files: per-VLAN `acls-<vlan>.conf` + legacy union `acls.conf` (all VLANs combined)
+
+**Upgrade from single-TPG to per-VLAN TPGs:**
+1. Add `iscsi_acls` and `iscsi_dataset` to the iSCSI VLAN in `client_vlans` (or leave absent for single-VLAN fallback)
+2. Create sub-dataset if needed: `zfs create san-pool/iscsi/hypervisor`
+3. Re-run playbook: `ansible-playbook -i inventory.yml site.yml --tags services`
+4. Verify: `targetcli ls /iscsi/` — one TPG per iSCSI VLAN, each with its VLAN's VIP
+5. For multi-VLAN only: old un-prefixed backstores remain. Move zvols to the correct sub-dataset and re-run sync, or delete old backstores manually via `targetcli /backstores/block delete <name>`.
+
+**Removing an iSCSI VLAN:** Remove it from `client_vlans`, re-run the playbook. The setup script warns about stale TPGs but does not auto-delete (requires manual cleanup: remove ACLs, portals, LUNs, then the TPG itself via `targetcli`).
 
 ### 4. Monitoring Changes
 
@@ -613,6 +656,7 @@ ssh storage-b 'zpool status san-pool'
 
 ## Change Log
 
+- **2026-03-09**: Per-VLAN iSCSI TPG isolation — each iSCSI-enabled client VLAN now gets its own LIO TPG with isolated portals, ACLs, and LUN namespace. Per-VLAN `iscsi_acls` and `iscsi_dataset` fields added to `client_vlans`. Multi-VLAN backstore naming uses `<vlan>-<zvol>` prefix to prevent VMID collisions; single-VLAN keeps existing names (safe upgrade). `setup-client-iscsi-target.sh` always re-runs (idempotent). `sync-iscsi-luns.sh` rewritten: Phase 0 bakes in TPG→VLAN mapping, Phase 1 extended python3 parser emits per-TPG LUN/ACL state, Phase 2 per-TPG zvol scanning, Phase 3 per-VLAN ACL file sync. Template fails clearly at deploy time if multi-VLAN config is missing required fields.
 - **2026-03-09**: Multi-VLAN client networks — replaced single `vlans.client` / `vip_nfs` / `vip_smb` / `vip_iscsi` with `client_vlans` list (per-VLAN VIP, subnet, services). Per-node `client_ip` → `client_ips` dict. Flat `san-services` Pacemaker group replaces per-service groups. Per-VLAN nftables rules auto-generated from `services` list. iSCSI portals bound to VIPs. SSH on client VLANs for Proxmox. `fence_check` pings all client IPs. `ip_nonlocal_bind=1` sysctl for HA VIP binding.
 - **2026-03-09**: Cockpit management binding — systemd socket drop-in binds `cockpit.socket` to `mgmt_ip:9090` + `vip_cockpit:9090` only (defense-in-depth).
 - **2026-03-08**: Optimized `sync-iscsi-luns.sh` — replaced per-item `targetcli ls` existence checks and individual write spawns with (1) a single `python3` invocation that parses `saveconfig.json` into bash associative arrays, and (2) a single batched `targetcli` stdin invocation for all changes. Reduces ~40 process spawns (15 zvols + 5 ACLs) to exactly 2 — expected runtime <5s vs previous 30–90s.
