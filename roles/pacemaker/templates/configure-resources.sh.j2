@@ -53,17 +53,24 @@ pcs resource create vip-cockpit ocf:heartbeat:IPaddr2 \
   2>/dev/null || \
   pcs resource update vip-cockpit ip="{{ vip_cockpit }}" cidr_netmask={{ vip_mgmt_cidr }} nic="{{ net_mgmt_interface }}"
 
-# ─── Service resources ─────────────────────────────────────────────────────
+# ─── Service resources (only for services enabled in client_vlans) ────────
+{% set _has_nfs = client_vlans | selectattr('services', 'contains', 'nfs') | list | length > 0 %}
+{% set _has_smb = client_vlans | selectattr('services', 'contains', 'smb') | list | length > 0 %}
+{% set _has_iscsi = client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0 %}
 echo "Creating service resources (idempotent — skipped if already present)"
+{% if _has_nfs %}
 pcs resource create nfs-server systemd:nfs-kernel-server \
   op start timeout=30s op stop timeout=30s \
   op monitor interval=30s \
   2>/dev/null || echo "  (nfs-server already exists)"
+{% endif %}
 
+{% if _has_smb %}
 pcs resource create smb-server systemd:smbd \
   op start timeout=30s op stop timeout=30s \
   op monitor interval=30s \
   2>/dev/null || echo "  (smb-server already exists)"
+{% endif %}
 
 # Cockpit service (starts after pool import so it can access shared configs)
 pcs resource create cockpit-service systemd:cockpit.socket \
@@ -71,6 +78,7 @@ pcs resource create cockpit-service systemd:cockpit.socket \
   op monitor interval=30s \
   2>/dev/null || echo "  (cockpit-service already exists)"
 
+{% if _has_iscsi %}
 # ─── iSCSI LUN sync (auto-maps zvols to LIO LUNs after pool import) ──────
 # Runs after pool import so /dev/zvol/ entries exist, before iSCSI VIP so
 # Proxmox/k3s initiators see all LUNs when they reconnect after failover.
@@ -81,18 +89,25 @@ pcs resource create sync-iscsi-luns systemd:sync-iscsi-luns \
   op start timeout=30s op stop timeout=10s \
   op monitor interval=0 \
   2>/dev/null || echo "  (sync-iscsi-luns already exists)"
+{% endif %}
 
 # ─── san-services group (flat: VIPs → sync → services) ──────────────────────
-# VIPs start first (in VLAN order), then iSCSI LUN sync, then NFS/SMB.
-# One group simplifies ordering/colocation — all resources follow zfs-pool.
+# VIPs start first (in VLAN order), then iSCSI LUN sync, then enabled services.
+# Only services present in at least one client_vlans[].services are included.
 echo "Creating san-services group"
 pcs resource group add san-services \
 {% for cv in client_vlans %}
   vip-{{ cv.name }} \
 {% endfor %}
+{% if _has_iscsi %}
   sync-iscsi-luns \
+{% endif %}
+{% if _has_nfs %}
   nfs-server \
+{% endif %}
+{% if _has_smb %}
   smb-server \
+{% endif %}
   2>/dev/null || echo "  (san-services group already exists)"
 
 # Cockpit group stays separate (management VLAN)
