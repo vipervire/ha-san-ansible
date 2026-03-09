@@ -1,0 +1,19 @@
+# Claude Code local settings
+.claude/
+
+# Ansible vault password files
+.vault_pass
+.vault_pass.txt
+*.vault
+
+# Retry files
+*.retry
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor
+.vscode/
+*.swp
+*~
