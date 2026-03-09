@@ -38,7 +38,11 @@ iscsi_cmds_max: 128
 # ---------------------------------------------------------------------------
 iscsi_client_iqn: "{{ iscsi_iqn_prefix }}:san-client-target"
 
-# Proxmox initiator IQNs allowed to connect to client-facing target
+# Proxmox initiator IQNs allowed to connect to client-facing target.
+# Used as single-VLAN fallback when the iSCSI VLAN in client_vlans (all.yml)
+# has no per-VLAN iscsi_acls defined. When multiple VLANs use iSCSI, set
+# iscsi_acls per-VLAN in client_vlans — this list is ignored (multi-VLAN requires
+# explicit per-VLAN ACLs to prevent cross-VLAN access).
 iscsi_client_acls:
   - "{{ iscsi_iqn_prefix }}:proxmox-a"
   - "{{ iscsi_iqn_prefix }}:proxmox-b"

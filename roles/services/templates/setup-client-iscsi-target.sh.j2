@@ -1,109 +1,175 @@
 #!/bin/bash
-# Managed by Ansible — Client-facing LIO iSCSI target setup
+# Managed by Ansible — Client-facing LIO iSCSI target setup (per-VLAN TPGs)
 # This script is idempotent: safe to re-run. Pacemaker starts/stops the service;
 # LIO configuration is persistent across reboots via targetcli saveconfig.
+#
+# Each iSCSI-enabled client VLAN gets its own TPG with isolated portals, ACLs,
+# and LUN mappings. Single-VLAN deployments produce one TPG (tpg1), functionally
+# identical to the old single-TPG behavior. TPG numbering follows loop.index
+# (first iSCSI VLAN = tpg1, second = tpg2, etc.).
+#
+# Re-run after VLAN changes: bash /root/setup-client-iscsi-target.sh
 set -euo pipefail
+{% set iscsi_vlans = client_vlans | selectattr('services', 'contains', 'iscsi') | list %}
+{% set iscsi_vlan_count = iscsi_vlans | length %}
+{# Validate multi-VLAN config at template render time — fail clearly rather than silently wrong #}
+{% if iscsi_vlan_count > 1 %}
+{%   for cv in iscsi_vlans %}
+{%     set _acl_check = cv.iscsi_acls | mandatory("client_vlans['" ~ cv.name ~ "'].iscsi_acls is required when multiple VLANs have iSCSI service (prevents cross-VLAN access)") %}
+{%     set _ds_check  = cv.iscsi_dataset | mandatory("client_vlans['" ~ cv.name ~ "'].iscsi_dataset is required when multiple VLANs have iSCSI service (prevents LUN namespace collisions)") %}
+{%   endfor %}
+{% endif %}
 
 TARGET_IQN="{{ iscsi_client_iqn }}"
+TOTAL_TPGS={{ iscsi_vlan_count }}
+
+# TPG assignments (baked in at Ansible deploy time):
+{% for cv in iscsi_vlans %}
+#   TPG{{ loop.index }}: VLAN={{ cv.name }}, VIP={{ cv.vip }}, Dataset={{ cv.iscsi_dataset | default(iscsi_client_zvol_dataset) }}
+{% endfor %}
 
 echo "=== Configuring client iSCSI target: ${TARGET_IQN} ==="
+echo "    iSCSI VLANs: {{ iscsi_vlans | map(attribute='name') | join(', ') }} (${TOTAL_TPGS} TPG(s))"
 
-# Check if target already exists
+# ─── Create target if needed (tpg1 auto-created with target) ──────────────────
 if targetcli ls /iscsi/"${TARGET_IQN}" &>/dev/null 2>&1; then
-  echo "Target ${TARGET_IQN} already exists — updating portals and ACLs."
-  TARGET_EXISTS=true
+  echo "Target ${TARGET_IQN} already exists — reconciling TPGs."
 else
-  TARGET_EXISTS=false
-fi
-
-if [[ "${TARGET_EXISTS}" == "false" ]]; then
-  # Create the iSCSI target
   targetcli /iscsi create "${TARGET_IQN}"
-
-  # Remove default 0.0.0.0 portal
-  targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals delete 0.0.0.0 3260 2>/dev/null || true
+  echo "  Created target ${TARGET_IQN} (tpg1 auto-created)"
 fi
 
-# ─── Bind portals to iSCSI-enabled client VLAN VIPs ──────────────────────────
-# Portals are bound to VIPs (not 0.0.0.0) so they only respond when VIP is active.
-# Requires net.ipv4.ip_nonlocal_bind=1 so LIO can bind before Pacemaker assigns VIPs.
-# Desired portal IPs (iSCSI-enabled client VLANs only)
-DESIRED_PORTALS=(
-{% for cv in client_vlans %}
-{% if 'iscsi' in cv.services %}
-  "{{ cv.vip }}"
+# Remove default 0.0.0.0 portal from tpg1 (created automatically with target)
+targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals delete 0.0.0.0 3260 2>/dev/null || true
+
+# ─── Per-VLAN TPG configuration ───────────────────────────────────────────────
+{% for cv in iscsi_vlans %}
+{% set tpg_num = loop.index %}
+{% set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
+
+echo ""
+echo "--- TPG{{ tpg_num }}: VLAN={{ cv.name }}, VIP={{ cv.vip }} ---"
+{% if tpg_num > 1 %}
+# Create tpg{{ tpg_num }} if it doesn't exist (tpg1 was auto-created with the target)
+if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} &>/dev/null 2>&1; then
+  targetcli /iscsi/"${TARGET_IQN}" create
+  echo "  Created tpg{{ tpg_num }}"
+  # Remove default 0.0.0.0 portal from the new TPG
+  targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/portals delete 0.0.0.0 3260 2>/dev/null || true
+fi
+{% endif %}
+
+# Bind portal — only this VLAN's VIP should be in this TPG
+if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/portals/"{{ cv.vip }}":3260 &>/dev/null 2>&1; then
+  targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/portals create "{{ cv.vip }}" 3260
+  echo "  + Created portal {{ cv.vip }}:3260"
+fi
+
+# Remove stale portals (anything that isn't this VLAN's VIP)
+while IFS= read -r portal_ip; do
+  [ -n "$portal_ip" ] || continue
+  if [ "$portal_ip" != "{{ cv.vip }}" ]; then
+    echo "  - Removing stale portal ${portal_ip}:3260 from tpg{{ tpg_num }}"
+    targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/portals delete "${portal_ip}" 3260
+  fi
+done < <(targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/portals/ 2>/dev/null \
+  | grep -oP '(?<=o- )\d+\.\d+\.\d+\.\d+' || true)
+
+# Enforce ACL-based access control (no auto-generated ACLs)
+targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute generate_node_acls=0
+{% if (cv.iscsi_chap_enabled is defined and cv.iscsi_chap_enabled) or (iscsi_client_chap_enabled | default(false)) %}
+# Enable CHAP authentication for this VLAN
+targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute authentication=1
+{% else %}
+# ACL-only mode — initiator IQN must match to connect, no CHAP
+targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute authentication=0
+{% endif %}
+
+# Enable the TPG (responds to initiator connections and SendTargets discovery)
+targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute tpg_enabled=1 2>/dev/null || true
+
+# Add missing ACLs for this VLAN
+{% for initiator_iqn in vlan_acls %}
+if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls/{{ initiator_iqn }} &>/dev/null 2>&1; then
+  targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls create {{ initiator_iqn }}
+  echo "  + Added ACL: {{ initiator_iqn }}"
+fi
+{% if (cv.iscsi_chap_enabled is defined and cv.iscsi_chap_enabled) or (iscsi_client_chap_enabled | default(false)) %}
+{% set chap_user = cv.iscsi_chap_user | default(iscsi_client_chap_user) %}
+{% set chap_pass = cv.iscsi_chap_password | default(iscsi_client_chap_password) %}
+targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls/{{ initiator_iqn }} \
+  set auth userid={{ chap_user }} password={{ chap_pass }}
 {% endif %}
 {% endfor %}
-)
 
-# Add missing portals
-for vip in "${DESIRED_PORTALS[@]}"; do
-  if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg1/portals/"${vip}":3260 &>/dev/null 2>&1; then
-    targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals create "${vip}" 3260
-    echo "  + Created portal ${vip}:3260"
+# Remove stale ACLs from this TPG (IQNs not in this VLAN's ACL list)
+TPG{{ tpg_num }}_DESIRED_ACLS=(
+{% for initiator_iqn in vlan_acls %}
+  "{{ initiator_iqn }}"
+{% endfor %}
+)
+while IFS= read -r existing_iqn; do
+  [ -n "$existing_iqn" ] || continue
+  found=false
+  for desired_iqn in "${TPG{{ tpg_num }}_DESIRED_ACLS[@]}"; do
+    if [ "$desired_iqn" = "$existing_iqn" ]; then found=true; break; fi
+  done
+  if [ "$found" = "false" ]; then
+    echo "  - Removing stale ACL from tpg{{ tpg_num }}: ${existing_iqn}"
+    targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls delete "${existing_iqn}"
+  fi
+done < <(targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls/ 2>/dev/null \
+  | grep -oP '(?<=o- )iqn\.[^\s]+' || true)
+{% endfor %}
+
+# ─── Warn about stale TPGs (beyond current VLAN count) ────────────────────────
+# Auto-deletion requires removing all LUNs, portals, and ACLs first — operator
+# should clean up manually when removing an iSCSI VLAN.
+echo ""
+echo "--- Checking for stale TPGs (beyond tpg${TOTAL_TPGS}) ---"
+for tpg_tag in $(targetcli ls /iscsi/"${TARGET_IQN}"/ 2>/dev/null \
+  | grep -oP '(?<=o- tpg)\d+' | sort -n || true); do
+  if [ "$tpg_tag" -gt "$TOTAL_TPGS" ]; then
+    echo "  WARNING: stale tpg${tpg_tag} found — no longer mapped to a VLAN."
+    echo "    Disable: targetcli /iscsi/${TARGET_IQN}/tpg${tpg_tag} set attribute tpg_enabled=0"
+    echo "    Then remove ACLs, portals, and LUNs before deleting the TPG."
   fi
 done
 
-# Remove stale portals (IPs no longer in an iSCSI-enabled VLAN)
-while IFS= read -r portal_ip; do
-  [ -n "$portal_ip" ] || continue
-  found=false
-  for vip in "${DESIRED_PORTALS[@]}"; do
-    if [ "$vip" = "$portal_ip" ]; then
-      found=true
-      break
-    fi
-  done
-  if [ "$found" = "false" ]; then
-    echo "  - Removing stale portal ${portal_ip}:3260"
-    targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals delete "${portal_ip}" 3260
-  fi
-done < <(targetcli ls /iscsi/"${TARGET_IQN}"/tpg1/portals/ 2>/dev/null | grep -oP '(?<=o- )\d+\.\d+\.\d+\.\d+' || true)
-
-{% if iscsi_client_chap_enabled | default(false) %}
-# Enable CHAP authentication
-targetcli /iscsi/"${TARGET_IQN}"/tpg1 set attribute authentication=1
-targetcli /iscsi/"${TARGET_IQN}"/tpg1 set attribute generate_node_acls=0
-
-{% for initiator_iqn in iscsi_client_acls %}
-# ACL for {{ initiator_iqn }}
-if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg1/acls/{{ initiator_iqn }} &>/dev/null 2>&1; then
-  targetcli /iscsi/"${TARGET_IQN}"/tpg1/acls create {{ initiator_iqn }}
-fi
-targetcli /iscsi/"${TARGET_IQN}"/tpg1/acls/{{ initiator_iqn }} \
-  set auth userid={{ iscsi_client_chap_user }} password={{ iscsi_client_chap_password }}
-{% endfor %}
-{% else %}
-# ACL-only mode (no CHAP — initiator IQN must match to connect)
-targetcli /iscsi/"${TARGET_IQN}"/tpg1 set attribute authentication=0
-targetcli /iscsi/"${TARGET_IQN}"/tpg1 set attribute generate_node_acls=0
-
-{% for initiator_iqn in iscsi_client_acls %}
-# ACL for {{ initiator_iqn }}
-if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg1/acls/{{ initiator_iqn }} &>/dev/null 2>&1; then
-  targetcli /iscsi/"${TARGET_IQN}"/tpg1/acls create {{ initiator_iqn }}
-fi
-{% endfor %}
-{% endif %}
-
-# ─── Seed ACL list on shared storage for failover sync ──────────────────────
-# sync-iscsi-luns.sh reads this file after pool import to recreate ACLs on
-# whichever node becomes active. One IQN per line. Edit this file (not
-# targetcli) to add/remove initiators — changes take effect on next failover
-# or manual sync run.
+# ─── Write per-VLAN ACL files to shared storage ────────────────────────────────
+# sync-iscsi-luns.sh reads acls-<vlan>.conf after pool import to recreate ACLs
+# on whichever node becomes active. Edit these files directly to add/remove
+# initiators without re-running Ansible.
 ACLS_DIR="/{{ zfs_pool_name }}/cluster-config/iscsi"
-ACLS_FILE="${ACLS_DIR}/acls.conf"
 mkdir -p "${ACLS_DIR}"
-cat > "${ACLS_FILE}" <<'ACLS_EOF'
-# Managed by Ansible — client iSCSI initiator ACLs
+{% for cv in iscsi_vlans %}
+{% set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
+cat > "${ACLS_DIR}/acls-{{ cv.name }}.conf" <<'ACLS_{{ cv.name | upper }}_EOF'
+# Managed by Ansible — iSCSI initiator ACLs for VLAN: {{ cv.name }} (TPG{{ loop.index }})
 # One IQN per line. Edit to add/remove initiators.
 # Changes apply on next failover or: bash /root/sync-iscsi-luns.sh
-{% for initiator_iqn in iscsi_client_acls %}
+{% for initiator_iqn in vlan_acls %}
 {{ initiator_iqn }}
 {% endfor %}
-ACLS_EOF
-chmod 0640 "${ACLS_FILE}"
-echo "ACL list seeded at ${ACLS_FILE}"
+ACLS_{{ cv.name | upper }}_EOF
+chmod 0640 "${ACLS_DIR}/acls-{{ cv.name }}.conf"
+echo "ACL list seeded at ${ACLS_DIR}/acls-{{ cv.name }}.conf"
+{% endfor %}
+
+# Write legacy union acls.conf for backward compatibility (all VLANs combined)
+cat > "${ACLS_DIR}/acls.conf" <<'UNION_ACLS_EOF'
+# Managed by Ansible — union ACL list (all iSCSI VLANs combined)
+# Per-VLAN files: acls-<vlan-name>.conf (preferred for per-VLAN sync)
+{% for cv in iscsi_vlans %}
+{% set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
+# VLAN: {{ cv.name }} (TPG{{ loop.index }})
+{% for initiator_iqn in vlan_acls %}
+{{ initiator_iqn }}
+{% endfor %}
+{% endfor %}
+UNION_ACLS_EOF
+chmod 0640 "${ACLS_DIR}/acls.conf"
 
 targetcli saveconfig
+echo ""
 echo "=== Client iSCSI target configured successfully ==="

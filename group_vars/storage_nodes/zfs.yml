@@ -47,6 +47,15 @@ zfs_datasets:
   - name: "{{ zfs_pool_name }}/iscsi"
     properties:
       primarycache: metadata
+  # Per-VLAN iSCSI sub-datasets — add entries matching iscsi_dataset values in client_vlans.
+  # Required when multiple VLANs use iSCSI (each VLAN gets its own LUN namespace).
+  # Single-VLAN deployments using the default "iscsi" dataset do NOT need sub-datasets.
+  # - name: "{{ zfs_pool_name }}/iscsi/hypervisor"
+  #   properties:
+  #     primarycache: metadata
+  # - name: "{{ zfs_pool_name }}/iscsi/dmz"
+  #   properties:
+  #     primarycache: metadata
   - name: "{{ zfs_pool_name }}/k3s-pv"
     properties:
       recordsize: "128k"
