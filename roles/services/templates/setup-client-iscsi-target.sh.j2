@@ -8,6 +8,9 @@
 # identical to the old single-TPG behavior. TPG numbering follows loop.index
 # (first iSCSI VLAN = tpg1, second = tpg2, etc.).
 #
+# CHAP is enabled per-initiator (ACL mode) or per-TPG (generate_node_acls mode)
+# when credentials are present in /root/.iscsi-chap.env.enc.
+#
 # Re-run after VLAN changes: bash /root/setup-client-iscsi-target.sh
 set -euo pipefail
 {% set iscsi_vlans = client_vlans | selectattr('services', 'contains', 'iscsi') | list %}
@@ -33,6 +36,17 @@ TOTAL_TPGS={{ iscsi_vlan_count }}
 echo "=== Configuring client iSCSI target: ${TARGET_IQN} ==="
 echo "    iSCSI VLANs: {{ iscsi_vlans | map(attribute='name') | join(', ') }} (${TOTAL_TPGS} TPG(s))"
 
+# ─── Decrypt CHAP credentials ─────────────────────────────────────────────
+# CHAP_USER["tpg:iqn"] / CHAP_PASS["tpg:iqn"] — per-initiator (ACL-mode VLANs)
+# TPG_CHAP_USER["tpg"] / TPG_CHAP_PASS["tpg"] — per-TPG (generate_node_acls VLANs)
+declare -A CHAP_USER CHAP_PASS TPG_CHAP_USER TPG_CHAP_PASS
+if [ -f /root/.iscsi-chap.env.enc ]; then
+  eval "$(openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/etc/machine-id \
+    -in /root/.iscsi-chap.env.enc 2>/dev/null)" || {
+    echo "WARNING: Failed to decrypt CHAP credentials — CHAP will not be applied"
+  }
+fi
+
 # ─── Create target if needed (tpg1 auto-created with target) ──────────────────
 if targetcli ls /iscsi/"${TARGET_IQN}" &>/dev/null; then
   echo "Target ${TARGET_IQN} already exists — reconciling TPGs."
@@ -49,7 +63,10 @@ targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals delete 0.0.0.0 3260 2>/dev/null ||
 {% set tpg_num = loop.index %}
 {% set vlan_generate_node_acls = cv.generate_node_acls | default(false) %}
 {% if not vlan_generate_node_acls %}
-{% set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
+{%   set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
+{%   set vlan_has_chap = vlan_acls | select('mapping') | selectattr('chap_password', 'defined') | list | length > 0 %}
+{% else %}
+{%   set vlan_has_chap = cv.iscsi_chap_password is defined %}
 {% endif %}
 
 echo ""
@@ -97,11 +114,11 @@ targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute demo_mode_write_
 # Enforce ACL-based access control (no auto-generated ACLs)
 targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute generate_node_acls=0
 {% endif %}
-{% if (cv.iscsi_chap_enabled is defined and cv.iscsi_chap_enabled) or (iscsi_client_chap_enabled | default(false)) %}
-# Enable CHAP authentication for this VLAN
+{% if vlan_has_chap %}
+# Enable CHAP authentication for this VLAN (credentials loaded from encrypted file)
 targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute authentication=1
 {% else %}
-# ACL-only mode — initiator IQN must match to connect, no CHAP
+# No CHAP configured — initiator IQN must match to connect (ACL mode) or any initiator (generate_node_acls)
 targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute authentication=0
 {% endif %}
 
@@ -110,25 +127,27 @@ targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute tpg_enabled=1 2>
 
 {% if not vlan_generate_node_acls %}
 # Add missing ACLs for this VLAN
-{% for initiator_iqn in vlan_acls %}
+{% for entry in vlan_acls %}
+{% set initiator_iqn = entry.iqn if entry is mapping else entry %}
 if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls/{{ initiator_iqn }} &>/dev/null; then
   targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls create {{ initiator_iqn }}
   echo "  + Added ACL: {{ initiator_iqn }}"
 fi
-{% if (cv.iscsi_chap_enabled is defined and cv.iscsi_chap_enabled) or (iscsi_client_chap_enabled | default(false)) %}
-{% set chap_user = cv.iscsi_chap_user | default(iscsi_client_chap_user) %}
-{% set chap_pass = cv.iscsi_chap_password | default(iscsi_client_chap_password) %}
-# Pass credentials via herestring so they go to targetcli stdin, not process argv.
-# Shell variable assignments are not visible in ps/proc; only subprocess invocations are.
-_chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }}/acls/{{ initiator_iqn }} set auth userid={{ chap_user }} password={{ chap_pass }}"
-targetcli <<< "$_chap_cmd"
-unset _chap_cmd
+{% if entry is mapping and entry.chap_password is defined %}
+# Apply per-initiator CHAP credentials from encrypted file
+chap_key="{{ tpg_num }}:{{ initiator_iqn }}"
+if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
+  _chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }}/acls/{{ initiator_iqn }} set auth userid=${CHAP_USER[$chap_key]} password=${CHAP_PASS[$chap_key]}"
+  targetcli <<< "$_chap_cmd"
+  unset _chap_cmd
+fi
 {% endif %}
 {% endfor %}
 
 # Remove stale ACLs from this TPG (IQNs not in this VLAN's ACL list)
 TPG{{ tpg_num }}_DESIRED_ACLS=(
-{% for initiator_iqn in vlan_acls %}
+{% for entry in vlan_acls %}
+{% set initiator_iqn = entry.iqn if entry is mapping else entry %}
   "{{ initiator_iqn }}"
 {% endfor %}
 )
@@ -144,13 +163,13 @@ while IFS= read -r existing_iqn; do
   fi
 done < <(targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls/ 2>/dev/null \
   | grep -oP '(?<=o- )iqn\.[^\s]+' || true)
-{% elif (cv.iscsi_chap_enabled is defined and cv.iscsi_chap_enabled) or (iscsi_client_chap_enabled | default(false)) %}
-# TPG-level CHAP — all initiators use the same credentials (generate_node_acls mode)
-{% set chap_user = cv.iscsi_chap_user | default(iscsi_client_chap_user) %}
-{% set chap_pass = cv.iscsi_chap_password | default(iscsi_client_chap_password) %}
-_chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }} set auth userid={{ chap_user }} password={{ chap_pass }}"
-targetcli <<< "$_chap_cmd"
-unset _chap_cmd
+{% elif vlan_has_chap %}
+# TPG-level CHAP — all initiators use the same credential (generate_node_acls mode)
+if [[ "${TPG_CHAP_USER[{{ tpg_num }}]+_}" ]]; then
+  _chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }} set auth userid=${TPG_CHAP_USER[{{ tpg_num }}]} password=${TPG_CHAP_PASS[{{ tpg_num }}]}"
+  targetcli <<< "$_chap_cmd"
+  unset _chap_cmd
+fi
 {% endif %}
 {% endfor %}
 
@@ -181,7 +200,8 @@ cat > "${ACLS_DIR}/acls-{{ cv.name }}.conf" <<'ACLS_{{ cv.name | upper }}_EOF'
 # Managed by Ansible — iSCSI initiator ACLs for VLAN: {{ cv.name }} (TPG{{ loop.index }})
 # One IQN per line. Edit to add/remove initiators.
 # Changes apply on next failover or: bash /root/sync-iscsi-luns.sh
-{% for initiator_iqn in vlan_acls %}
+{% for entry in vlan_acls %}
+{% set initiator_iqn = entry.iqn if entry is mapping else entry %}
 {{ initiator_iqn }}
 {% endfor %}
 ACLS_{{ cv.name | upper }}_EOF
@@ -198,7 +218,8 @@ cat > "${ACLS_DIR}/acls.conf" <<'UNION_ACLS_EOF'
 {% if not (cv.generate_node_acls | default(false)) %}
 {% set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
 # VLAN: {{ cv.name }} (TPG{{ loop.index }})
-{% for initiator_iqn in vlan_acls %}
+{% for entry in vlan_acls %}
+{% set initiator_iqn = entry.iqn if entry is mapping else entry %}
 {{ initiator_iqn }}
 {% endfor %}
 {% endif %}

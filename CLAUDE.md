@@ -93,14 +93,27 @@ Each iSCSI-enabled client VLAN gets its own LIO TPG. Per-VLAN fields in `client_
 - name: hypervisor
   services: [iscsi, ssh]
   iscsi_acls:                          # required when multiple VLANs use iSCSI
-    - "iqn.2025-01.lab.home:proxmox-a"
+    - "iqn.2025-01.lab.home:proxmox-a"  # plain string = ACL-only, no CHAP
+    - iqn: "iqn.2025-01.lab.home:proxmox-b"  # dict = per-initiator CHAP
+      chap_user: "proxmox-b"
+      chap_password: !vault |...       # vault-encrypt in production
   iscsi_dataset: "iscsi/hypervisor"    # required when multiple VLANs use iSCSI
 ```
 
 - Single-VLAN: both fields optional (fall back to `iscsi_client_acls` / `iscsi_client_zvol_dataset`)
 - Backstore naming: single-VLAN = `<zvol>`, multi-VLAN = `<vlan>-<zvol>` (prevents VMID collisions)
 - Template fails at deploy time if multi-VLAN config is missing required fields
-- `generate_node_acls: true` — sets `generate_node_acls=1` + `demo_mode_write_protect=0` on the VLAN's TPG; required for Proxmox ZFS-over-iSCSI plugin (which doesn't support per-IQN ACLs). When set, `iscsi_acls` is not required and no individual ACL entries are created. CHAP still works — credentials are set at TPG level (shared by all initiators). `sync-iscsi-luns.sh` skips ACL sync for this TPG.
+- `generate_node_acls: true` — sets `generate_node_acls=1` + `demo_mode_write_protect=0` on the VLAN's TPG; required for Proxmox ZFS-over-iSCSI plugin (which doesn't support per-IQN ACLs). When set, `iscsi_acls` is not required and no individual ACL entries are created. `sync-iscsi-luns.sh` skips ACL sync for this TPG.
+- Per-TPG CHAP (for `generate_node_acls` VLANs): add `iscsi_chap_user` + `iscsi_chap_password` at VLAN level — all initiators share one credential.
+- **CHAP is implicit** — no toggle needed. Credentials present = `authentication=1`; no credentials = `authentication=0`.
+
+### iSCSI CHAP Encrypted Credentials
+
+CHAP credentials are never stored in plaintext on disk. Ansible deploys `/root/.iscsi-chap.env.enc` (mode 0600, encrypted with OpenSSL AES-256-CBC using `/etc/machine-id` as passphrase). Both `setup-client-iscsi-target.sh` and `sync-iscsi-luns.sh` decrypt at runtime via `eval "$(openssl enc -d ...)"`.
+
+- **Machine-specific**: the encrypted file is useless on any other node
+- **Password rotation**: re-run `ansible-playbook ... --tags services` → new encrypted file deployed → re-run setup script
+- **Global CHAP defaults removed**: `iscsi_client_chap_enabled` / `iscsi_client_chap_user` / `iscsi_client_chap_password` no longer exist. Credentials live at initiator or VLAN level only.
 
 ### iSCSI LUN Auto-Sync
 

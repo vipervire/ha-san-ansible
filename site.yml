@@ -85,16 +85,42 @@
         iscsi_mutual_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_mutual_chap_password | default('') }}"
       when: hostvars[groups['storage_nodes'][0]].iscsi_mutual_chap_enabled | default(false) | bool
 
-    - name: Assert client-facing iSCSI CHAP password is set when enabled
+    - name: Assert per-initiator CHAP passwords do not contain CHANGEME
       ansible.builtin.assert:
         that:
-          - iscsi_client_chap_password | length > 0
+          - "'CHANGEME' not in (item | string)"
         fail_msg: |
-          CONFIGURATION ERROR: iscsi_client_chap_enabled is true but iscsi_client_chap_password is empty.
-          Set a vault-encrypted password in group_vars/storage_nodes or roles/services defaults.
-      vars:
-        iscsi_client_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_client_chap_password | default('') }}"
-      when: hostvars[groups['storage_nodes'][0]].iscsi_client_chap_enabled | default(false) | bool
+          SECURITY ERROR: Default placeholder detected in a per-initiator chap_password in client_vlans.
+          Vault-encrypt all chap_password values in iscsi_acls before deploying.
+      loop: >-
+        {{
+          client_vlans
+          | selectattr('services', 'contains', 'iscsi')
+          | map(attribute='iscsi_acls', default=[])
+          | flatten
+          | select('mapping')
+          | selectattr('chap_password', 'defined')
+          | map(attribute='chap_password')
+          | list
+        }}
+
+    - name: Assert per-TPG CHAP passwords do not contain CHANGEME
+      ansible.builtin.assert:
+        that:
+          - "'CHANGEME' not in (item | string)"
+        fail_msg: |
+          SECURITY ERROR: Default placeholder detected in iscsi_chap_password for a generate_node_acls VLAN.
+          Vault-encrypt all iscsi_chap_password values in client_vlans before deploying.
+      loop: >-
+        {{
+          client_vlans
+          | selectattr('services', 'contains', 'iscsi')
+          | selectattr('generate_node_acls', 'defined')
+          | selectattr('generate_node_acls')
+          | selectattr('iscsi_chap_password', 'defined')
+          | map(attribute='iscsi_chap_password')
+          | list
+        }}
 
 # ─── Pre-run: Warn if cluster is already deployed and degraded ──────────────
 - name: "Pre-run cluster health check (storage nodes)"

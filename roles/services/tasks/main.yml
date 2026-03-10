@@ -114,6 +114,19 @@
 # Triggered when any client VLAN has 'iscsi' in its services list.
 # Each iSCSI-enabled VLAN gets its own TPG with isolated portals, ACLs, and LUNs.
 # Single-VLAN deployments produce one TPG, functionally identical to the old behavior.
+
+- name: Deploy encrypted iSCSI CHAP credentials
+  ansible.builtin.shell:
+    cmd: |
+      cat <<'CHAP_EOF' | openssl enc -aes-256-cbc -pbkdf2 -salt \
+        -pass file:/etc/machine-id -out /root/.iscsi-chap.env.enc
+      {{ lookup('template', 'iscsi-chap-credentials.env.j2') }}
+      CHAP_EOF
+      chmod 0600 /root/.iscsi-chap.env.enc
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
+  changed_when: true
+  no_log: true
+
 - name: Generate client iSCSI target setup script
   ansible.builtin.template:
     src: setup-client-iscsi-target.sh.j2

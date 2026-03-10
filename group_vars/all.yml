@@ -55,16 +55,36 @@ client_vlans:
     description: "Hypervisor iSCSI"
     # Per-VLAN iSCSI ACLs — required when multiple VLANs use iSCSI service.
     # When only one VLAN has iSCSI, falls back to iscsi_client_acls in iscsi.yml.
-    # generate_node_acls: true  — allow any initiator (required for Proxmox ZFS-over-iSCSI plugin).
-    # Sets generate_node_acls=1 + demo_mode_write_protect=0 on this VLAN's TPG.
-    # When true, iscsi_acls is not required and individual ACL entries are not created.
+    # Entries can be plain IQN strings (ACL-only, no CHAP) or dicts with per-initiator CHAP:
+    #   Plain string:  "iqn.2025-01.lab.home:proxmox-a"
+    #   Dict with CHAP: {iqn: "...", chap_user: "proxmox-a", chap_password: !vault |...}
+    # CHAP is implicit: present credentials = CHAP on; no credentials = CHAP off.
     iscsi_acls:
       - "{{ iscsi_iqn_prefix }}:proxmox-a"
       - "{{ iscsi_iqn_prefix }}:proxmox-b"
+    # Example with per-initiator CHAP (vault-encrypt chap_password in production):
+    # iscsi_acls:
+    #   - iqn: "{{ iscsi_iqn_prefix }}:proxmox-a"
+    #     chap_user: "proxmox-a"
+    #     chap_password: !vault |
+    #       $ANSIBLE_VAULT;1.1;AES256
+    #       ...
+    #   - iqn: "{{ iscsi_iqn_prefix }}:proxmox-b"
+    #     chap_user: "proxmox-b"
+    #     chap_password: !vault |
+    #       $ANSIBLE_VAULT;1.1;AES256
+    #       ...
     # Per-VLAN zvol dataset — required when multiple VLANs use iSCSI service.
     # When only one VLAN has iSCSI, falls back to iscsi_client_zvol_dataset (default: "iscsi").
     # Sub-datasets must be created in zfs_datasets (see group_vars/storage_nodes/zfs.yml).
     iscsi_dataset: "iscsi/hypervisor"
+    # generate_node_acls: true  — allow any initiator (required for Proxmox ZFS-over-iSCSI plugin).
+    # Sets generate_node_acls=1 + demo_mode_write_protect=0 on this VLAN's TPG.
+    # When true, iscsi_acls is not required. Optional per-TPG CHAP (shared by all initiators):
+    #   iscsi_chap_user: "proxmox-tpg"
+    #   iscsi_chap_password: !vault |
+    #     $ANSIBLE_VAULT;1.1;AES256
+    #     ...
 
 # Management VIP for Cockpit (on management VLAN)
 vip_cockpit: "10.20.20.10"

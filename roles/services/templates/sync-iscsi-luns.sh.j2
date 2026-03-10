@@ -37,6 +37,17 @@ TPG_BS_PREFIX[{{ loop.index }}]="{{ (cv.name + '-') if iscsi_vlan_count > 1 else
 TPG_GEN_ACLS[{{ loop.index }}]="{{ 'true' if (cv.generate_node_acls | default(false)) else 'false' }}"
 {% endfor %}
 
+# ─── Decrypt CHAP credentials ─────────────────────────────────────────────
+# CHAP_USER["tpg:iqn"] / CHAP_PASS["tpg:iqn"] — per-initiator (ACL-mode VLANs)
+# TPG_CHAP_USER["tpg"] / TPG_CHAP_PASS["tpg"] — per-TPG (generate_node_acls VLANs)
+declare -A CHAP_USER CHAP_PASS TPG_CHAP_USER TPG_CHAP_PASS
+if [ -f /root/.iscsi-chap.env.enc ]; then
+  eval "$(openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/etc/machine-id \
+    -in /root/.iscsi-chap.env.enc 2>/dev/null)" || {
+    echo "WARNING: Failed to decrypt CHAP credentials — CHAP will not be applied"
+  }
+fi
+
 echo "=== Syncing iSCSI LUNs for target: ${TARGET_IQN} ==="
 {% for cv in iscsi_vlans %}
 echo "    TPG{{ loop.index }}: VLAN={{ cv.name }}, dataset={{ cv.iscsi_dataset | default(iscsi_client_zvol_dataset) }}"
@@ -200,6 +211,11 @@ for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
     vlan_name="${TPG_VLAN[$tpg_tag]}"
     if [ "${TPG_GEN_ACLS[$tpg_tag]}" = "true" ]; then
         echo "  (tpg${tpg_tag}/VLAN=${vlan_name}: generate_node_acls — skipping ACL sync)"
+        # Apply TPG-level CHAP if credentials are available
+        if [[ "${TPG_CHAP_USER[$tpg_tag]+_}" ]]; then
+            echo "  + Setting TPG-level CHAP for tpg${tpg_tag}"
+            COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag} set auth userid=${TPG_CHAP_USER[$tpg_tag]} password=${TPG_CHAP_PASS[$tpg_tag]}")
+        fi
         continue
     fi
     acl_file="${ACLS_DIR}/acls-${vlan_name}.conf"
@@ -229,6 +245,11 @@ for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
         if [[ "${DESIRED_SET[$iqn]+_}" ]] && [[ ! "${EXISTING_ACLS[$acl_key]+_}" ]]; then
             echo "  + Adding ACL to tpg${tpg_tag}: ${iqn}"
             COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/acls create ${iqn}")
+            # Apply per-initiator CHAP if credentials are available
+            chap_key="${tpg_tag}:${iqn}"
+            if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
+                COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/acls/${iqn} set auth userid=${CHAP_USER[$chap_key]} password=${CHAP_PASS[$chap_key]}")
+            fi
         fi
     done
 
