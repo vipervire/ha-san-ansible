@@ -232,9 +232,9 @@ This playbook deploys comprehensive monitoring for both storage and cluster heal
 - `zfs_dataset_last_snapshot_seconds` - Timestamp of most recent Sanoid snapshot per dataset
 
 ### Hardware Health Metrics (custom exporters, updated every 5 min)
-- `smart_*` - SMART disk health metrics (smart-exporter, storage nodes only)
-- `ras_*` - RAS/ECC hardware error metrics (ras-exporter, storage nodes only)
-- `hwtemp_*` - Hardware temperature sensor metrics (hwtemp-exporter, storage nodes only)
+- `node_disk_smart_*` - SMART disk health: healthy status, temperature, reallocated sectors, power-on hours, NVMe-specific metrics (smart-exporter, storage nodes only)
+- `node_memory_correctable_errors_total`, `node_memory_uncorrectable_errors_total` - RAS/ECC hardware memory errors (ras-exporter, storage nodes only)
+- `node_nic_temperature_celsius`, `node_nic_sfp_temperature_celsius`, `node_hba_temperature_celsius` - NIC/HBA hardware temperatures (hwtemp-exporter, storage nodes only)
 
 ### STONITH Probe Metrics (stonith-probe exporter, updated every 2 min)
 - `stonith_agent_reachable` - Whether each fence agent IP is pingable (storage nodes only)
