@@ -151,8 +151,8 @@ After the manual steps are complete, run through this checklist:
 pcs status
 
 # Test planned failover (~5-8s)
-pcs resource move san-services storage-b
-pcs resource clear san-services
+pcs resource move zfs-pool storage-b
+pcs resource clear zfs-pool
 
 # Test unplanned failover (~10-12s) — PULL THE POWER CORD on active node
 # Verify clients reconnect within 15-25s total
