@@ -211,10 +211,16 @@ for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
     vlan_name="${TPG_VLAN[$tpg_tag]}"
     if [ "${TPG_GEN_ACLS[$tpg_tag]}" = "true" ]; then
         echo "  (tpg${tpg_tag}/VLAN=${vlan_name}: generate_node_acls — skipping ACL sync)"
-        # Apply TPG-level CHAP if credentials are available
+        # Apply TPG-level CHAP if credentials are available.
+        # Sent directly via herestring (not batched through COMMANDS) so credential
+        # values are never held as plaintext strings in the array.
+        # NOTE: set -x must not be used in wrapper scripts — it would expose credentials.
         if [[ "${TPG_CHAP_USER[$tpg_tag]+_}" ]]; then
-            echo "  + Setting TPG-level CHAP for tpg${tpg_tag}"
-            COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag} set auth userid=${TPG_CHAP_USER[$tpg_tag]} password=${TPG_CHAP_PASS[$tpg_tag]}")
+            echo "  + Setting TPG-level CHAP and authentication=1 for tpg${tpg_tag}"
+            targetcli <<< "/iscsi/${TARGET_IQN}/tpg${tpg_tag} set attribute authentication=1"
+            _chap_cmd="/iscsi/${TARGET_IQN}/tpg${tpg_tag} set auth userid=${TPG_CHAP_USER[$tpg_tag]} password=${TPG_CHAP_PASS[$tpg_tag]}"
+            targetcli <<< "$_chap_cmd"
+            unset _chap_cmd
         fi
         continue
     fi
@@ -245,10 +251,15 @@ for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
         if [[ "${DESIRED_SET[$iqn]+_}" ]] && [[ ! "${EXISTING_ACLS[$acl_key]+_}" ]]; then
             echo "  + Adding ACL to tpg${tpg_tag}: ${iqn}"
             COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/acls create ${iqn}")
-            # Apply per-initiator CHAP if credentials are available
+            # Apply per-initiator CHAP if credentials are available.
+            # Sent directly via herestring (not batched through COMMANDS) so credential
+            # values are never held as plaintext strings in the array.
+            # NOTE: set -x must not be used in wrapper scripts — it would expose credentials.
             chap_key="${tpg_tag}:${iqn}"
             if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
-                COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/acls/${iqn} set auth userid=${CHAP_USER[$chap_key]} password=${CHAP_PASS[$chap_key]}")
+                _chap_cmd="/iscsi/${TARGET_IQN}/tpg${tpg_tag}/acls/${iqn} set auth userid=${CHAP_USER[$chap_key]} password=${CHAP_PASS[$chap_key]}"
+                targetcli <<< "$_chap_cmd"
+                unset _chap_cmd
             fi
         fi
     done

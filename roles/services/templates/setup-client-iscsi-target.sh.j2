@@ -123,7 +123,7 @@ targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute authentication=0
 {% endif %}
 
 # Enable the TPG (responds to initiator connections and SendTargets discovery)
-targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute tpg_enabled=1 2>/dev/null || true
+targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} enable 2>/dev/null || true
 
 {% if not vlan_generate_node_acls %}
 # Add missing ACLs for this VLAN
