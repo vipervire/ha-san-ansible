@@ -131,6 +131,10 @@ fi
 # ─── Collect all changes; apply in a single targetcli batch ───────────────────
 # Reduces N separate process spawns (one per zvol/ACL) to exactly 1.
 COMMANDS=()
+# CHAP_TARGETS holds "tpg:iqn" keys (no credential values) for ACLs that need
+# per-initiator CHAP applied. Applied in a second pass after Phase 4 so the
+# ACL path exists before the set auth command runs.
+CHAP_TARGETS=()
 
 # ─── Phase 2: Per-TPG zvol scanning ───────────────────────────────────────────
 for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
@@ -251,15 +255,11 @@ for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
         if [[ "${DESIRED_SET[$iqn]+_}" ]] && [[ ! "${EXISTING_ACLS[$acl_key]+_}" ]]; then
             echo "  + Adding ACL to tpg${tpg_tag}: ${iqn}"
             COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/acls create ${iqn}")
-            # Apply per-initiator CHAP if credentials are available.
-            # Sent directly via herestring (not batched through COMMANDS) so credential
-            # values are never held as plaintext strings in the array.
-            # NOTE: set -x must not be used in wrapper scripts — it would expose credentials.
+            # Queue for CHAP application after Phase 4 (ACL must exist first).
+            # Only the tpg:iqn key is stored — no credential values in the array.
             chap_key="${tpg_tag}:${iqn}"
             if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
-                _chap_cmd="/iscsi/${TARGET_IQN}/tpg${tpg_tag}/acls/${iqn} set auth userid=${CHAP_USER[$chap_key]} password=${CHAP_PASS[$chap_key]}"
-                targetcli <<< "$_chap_cmd"
-                unset _chap_cmd
+                CHAP_TARGETS+=("${tpg_tag}:${iqn}")
             fi
         fi
     done
@@ -283,4 +283,31 @@ if [ ${#COMMANDS[@]} -gt 0 ]; then
     echo "=== LIO configuration saved ==="
 else
     echo "=== No changes needed — all LUNs and ACLs in sync ==="
+fi
+
+# ─── Phase 5: Apply per-initiator CHAP credentials ────────────────────────────
+# Run after Phase 4 so ACL paths created above are guaranteed to exist.
+# Credentials are never stored in the COMMANDS array — each command is issued
+# via herestring and the variable is immediately unset.
+# NOTE: set -x must not be used in wrapper scripts — it would expose credentials.
+if [ ${#CHAP_TARGETS[@]} -gt 0 ]; then
+    echo ""
+    echo "--- Phase 5: Per-initiator CHAP credentials ---"
+    chap_changed=false
+    for chap_target in "${CHAP_TARGETS[@]}"; do
+        _tpg="${chap_target%%:*}"
+        _iqn="${chap_target#*:}"
+        chap_key="${_tpg}:${_iqn}"
+        if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
+            echo "  + Setting CHAP credentials for tpg${_tpg}: ${_iqn}"
+            _chap_cmd="/iscsi/${TARGET_IQN}/tpg${_tpg}/acls/${_iqn} set auth userid=${CHAP_USER[$chap_key]} password=${CHAP_PASS[$chap_key]}"
+            targetcli <<< "$_chap_cmd"
+            unset _chap_cmd
+            chap_changed=true
+        fi
+    done
+    if [ "$chap_changed" = "true" ]; then
+        targetcli saveconfig
+        echo "=== CHAP credentials applied and configuration saved ==="
+    fi
 fi

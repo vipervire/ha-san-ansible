@@ -182,7 +182,7 @@ for tpg_tag in $(targetcli ls /iscsi/"${TARGET_IQN}"/ 2>/dev/null \
   | grep -oP '(?<=o- tpg)\d+' | sort -n || true); do
   if [ "$tpg_tag" -gt "$TOTAL_TPGS" ]; then
     echo "  WARNING: stale tpg${tpg_tag} found — no longer mapped to a VLAN."
-    echo "    Disable: targetcli /iscsi/${TARGET_IQN}/tpg${tpg_tag} set attribute tpg_enabled=0"
+    echo "    Disable: targetcli /iscsi/${TARGET_IQN}/tpg${tpg_tag} disable"
     echo "    Then remove ACLs, portals, and LUNs before deleting the TPG."
   fi
 done

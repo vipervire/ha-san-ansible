@@ -53,10 +53,12 @@
           SECURITY ERROR: Default placeholder credentials detected.
           Update before deploying:
             hacluster_password         — ansible-vault encrypt_string 'yourpassword'
-            iscsi_chap_password        — ansible-vault encrypt_string 'yourpassword'
-            iscsi_mutual_chap_password — ansible-vault encrypt_string 'yourpassword'
+            iscsi_chap_password        — backend replication CHAP (group_vars/storage_nodes/iscsi.yml)
+            iscsi_mutual_chap_password — backend replication mutual CHAP (group_vars/storage_nodes/iscsi.yml)
             stonith_nodes.<node>.password — ansible-vault encrypt_string 'yourpassword'
             admin_ssh_pubkey           — replace with your actual SSH public key
+          Note: client-facing iSCSI CHAP is configured per-initiator in client_vlans[].iscsi_acls
+          or per-TPG in client_vlans[].iscsi_chap_password — checked separately below.
       vars:
         hacluster_password: "{{ hostvars[groups['storage_nodes'][0]].hacluster_password | default('') }}"
         iscsi_chap_password: "{{ hostvars[groups['storage_nodes'][0]].iscsi_chap_password | default('') }}"

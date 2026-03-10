@@ -124,6 +124,8 @@
       CHAP_EOF
       chmod 0600 /root/.iscsi-chap.env.enc
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
+  # always-changed: openssl -salt produces a different ciphertext on every run so a
+  # checksum comparison cannot detect whether the plaintext credentials changed.
   changed_when: true
   no_log: true
 
