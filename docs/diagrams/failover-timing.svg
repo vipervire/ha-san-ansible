@@ -1,0 +1,40 @@
+<svg viewBox="0 0 1050 190" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1050px;display:block;margin:0 auto;">
+  <text x="525" y="20" fill="#c8d1dc" font-size="13" text-anchor="middle" font-weight="600">Unplanned Failover: Phase Timing Budget</text>
+
+  <!-- Background bar -->
+  <rect x="50" y="40" width="950" height="40" rx="4" fill="#1a2230" stroke="#2a3545"/>
+
+  <!-- Detection: 0-4s -->
+  <rect x="52" y="42" width="340" height="36" rx="3" fill="#f59e4233"/>
+  <text x="222" y="65" fill="#f59e42" font-size="10" text-anchor="middle" font-weight="600">Detection ~4–5s</text>
+
+  <!-- STONITH: 4-8s -->
+  <rect x="394" y="42" width="220" height="36" rx="3" fill="#ef535033"/>
+  <text x="504" y="65" fill="#ef5350" font-size="10" text-anchor="middle" font-weight="600">STONITH ~2–4s</text>
+
+  <!-- Import: 8-10s -->
+  <rect x="616" y="42" width="170" height="36" rx="3" fill="#2dd4a033"/>
+  <text x="701" y="65" fill="#2dd4a0" font-size="10" text-anchor="middle" font-weight="600">Import ~1–3s</text>
+
+  <!-- Services: 10-12s -->
+  <rect x="788" y="42" width="210" height="36" rx="3" fill="#22d3ee33"/>
+  <text x="893" y="65" fill="#22d3ee" font-size="10" text-anchor="middle" font-weight="600">Services ~1–2s</text>
+
+  <!-- Labels below -->
+  <text x="222" y="105" fill="#6b7a8d" font-size="9" text-anchor="middle">iSCSI noop: 2+2s</text>
+  <text x="222" y="118" fill="#6b7a8d" font-size="9" text-anchor="middle">Corosync token: 4s</text>
+  <text x="222" y="131" fill="#6b7a8d" font-size="9" text-anchor="middle">(run in parallel)</text>
+
+  <text x="504" y="105" fill="#6b7a8d" font-size="9" text-anchor="middle">IPMI: ~2s</text>
+  <text x="504" y="118" fill="#6b7a8d" font-size="9" text-anchor="middle">Smart plug: ~4s</text>
+
+  <text x="701" y="105" fill="#6b7a8d" font-size="9" text-anchor="middle">ZIL replay</text>
+  <text x="701" y="118" fill="#6b7a8d" font-size="9" text-anchor="middle">Degraded (local only)</text>
+
+  <text x="893" y="105" fill="#6b7a8d" font-size="9" text-anchor="middle">VIPs + grat. ARP</text>
+  <text x="893" y="118" fill="#6b7a8d" font-size="9" text-anchor="middle">NFS/SMB/iSCSI start</text>
+
+  <!-- Total -->
+  <line x1="50" y1="150" x2="1000" y2="150" stroke="#2a3545" stroke-width="1"/>
+  <text x="525" y="170" fill="#c8d1dc" font-size="11" text-anchor="middle" font-weight="600">Total server-side: ~10–12s · Client reconnection: +5–15s additional</text>
+</svg>

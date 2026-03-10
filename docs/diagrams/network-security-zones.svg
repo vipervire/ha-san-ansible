@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1050 420">
+  <text x="525" y="22" fill="#ef5350" font-size="14" text-anchor="middle" font-weight="700">Network Security Zones — What Talks to What</text>
+
+  <!-- Storage VLAN -->
+  <rect x="30" y="45" width="230" height="110" rx="6" fill="#ef535011" stroke="#ef5350" stroke-width="1.5"/>
+  <text x="50" y="68" fill="#ef5350" font-size="11" font-weight="600">VLAN 10 — Storage (RESTRICTED)</text>
+  <text x="50" y="86" fill="#c8d1dc" font-size="9">Only storage-a ↔ storage-b</text>
+  <text x="50" y="102" fill="#c8d1dc" font-size="9">No routing to any other VLAN</text>
+  <text x="50" y="118" fill="#c8d1dc" font-size="9">No internet access</text>
+  <text x="50" y="134" fill="#c8d1dc" font-size="9">iSCSI: CHAP auth + IP ACLs in LIO</text>
+  <text x="50" y="150" fill="#6b7a8d" font-size="8">Highest sensitivity — unencrypted block I/O</text>
+
+  <!-- Mgmt VLAN -->
+  <rect x="290" y="45" width="230" height="110" rx="6" fill="#f59e4211" stroke="#f59e42" stroke-width="1.5"/>
+  <text x="310" y="68" fill="#f59e42" font-size="11" font-weight="600">VLAN 20 — Management (CONTROLLED)</text>
+  <text x="310" y="86" fill="#c8d1dc" font-size="9">SSH, IPMI, Corosync, Cockpit UI</text>
+  <text x="310" y="102" fill="#c8d1dc" font-size="9">Firewall: only admin IPs for SSH/Cockpit</text>
+  <text x="310" y="118" fill="#c8d1dc" font-size="9">Corosync: encrypted (AES-256 + SHA-256)</text>
+  <text x="310" y="134" fill="#c8d1dc" font-size="9">IPMI on dedicated subnet, change defaults</text>
+  <text x="310" y="150" fill="#6b7a8d" font-size="8">Moderate sensitivity — admin access</text>
+
+  <!-- Enduser Client VLAN -->
+  <rect x="550" y="45" width="220" height="110" rx="6" fill="#22d3ee11" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="570" y="68" fill="#22d3ee" font-size="11" font-weight="600">VLAN 30 — Enduser (MONITORED)</text>
+  <text x="570" y="86" fill="#c8d1dc" font-size="9">NFS, SMB to VMs/pods</text>
+  <text x="570" y="102" fill="#c8d1dc" font-size="9">VIP: vip-enduser (10.30.30.10)</text>
+  <text x="570" y="118" fill="#c8d1dc" font-size="9">NFS: restrict to subnet + sec=sys</text>
+  <text x="570" y="134" fill="#c8d1dc" font-size="9">SMB: SMB3 only, signing required</text>
+  <text x="570" y="150" fill="#6b7a8d" font-size="8">Lower sensitivity — data in transit</text>
+
+  <!-- Hypervisor Client VLAN -->
+  <rect x="800" y="45" width="220" height="110" rx="6" fill="#a78bfa11" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="820" y="68" fill="#a78bfa" font-size="11" font-weight="600">VLAN 40 — Hypervisor (CONTROLLED)</text>
+  <text x="820" y="86" fill="#c8d1dc" font-size="9">iSCSI, SSH to Proxmox hosts</text>
+  <text x="820" y="102" fill="#c8d1dc" font-size="9">VIP: vip-hypervisor (10.40.40.10)</text>
+  <text x="820" y="118" fill="#c8d1dc" font-size="9">iSCSI: CHAP + ACL per initiator</text>
+  <text x="820" y="134" fill="#c8d1dc" font-size="9">generate_node_acls or per-IQN ACLs</text>
+  <text x="820" y="150" fill="#6b7a8d" font-size="8">High sensitivity — raw block I/O to VMs</text>
+
+  <!-- Firewall rules summary -->
+  <rect x="30" y="180" width="990" height="220" rx="6" fill="#111820" stroke="#2a3545" stroke-width="1"/>
+  <text x="525" y="205" fill="#c8d1dc" font-size="12" text-anchor="middle" font-weight="600">Firewall Rule Matrix (nftables on each storage node)</text>
+
+  <text x="60" y="228" fill="#ef5350" font-size="9" font-weight="600">VLAN 10 (storage):</text>
+  <text x="220" y="228" fill="#c8d1dc" font-size="9">ALLOW tcp/3260 from peer storage node ONLY. DROP everything else.</text>
+
+  <text x="60" y="248" fill="#f59e42" font-size="9" font-weight="600">VLAN 20 (mgmt):</text>
+  <text x="220" y="248" fill="#c8d1dc" font-size="9">ALLOW tcp/22 from admin IPs. ALLOW udp/5405 (Corosync) from cluster nodes. ALLOW tcp/9090 (Cockpit) from admin IPs. ALLOW tcp/2224 (pcsd).</text>
+
+  <text x="60" y="268" fill="#22d3ee" font-size="9" font-weight="600">VLAN 30 (enduser):</text>
+  <text x="220" y="268" fill="#c8d1dc" font-size="9">ALLOW tcp/2049 (NFS), tcp/445 (SMB) from 10.30.30.0/24. DROP from everywhere else.</text>
+
+  <text x="60" y="288" fill="#a78bfa" font-size="9" font-weight="600">VLAN 40 (hypervisor):</text>
+  <text x="220" y="288" fill="#c8d1dc" font-size="9">ALLOW tcp/3260 (iSCSI), tcp/22 (SSH) from 10.40.40.0/24. DROP from everywhere else.</text>
+
+  <text x="60" y="308" fill="#6b7a8d" font-size="9" font-weight="600">Default policy:</text>
+  <text x="220" y="308" fill="#6b7a8d" font-size="9">INPUT DROP, FORWARD DROP, OUTPUT ACCEPT. Log dropped packets for audit.</text>
+
+  <text x="60" y="335" fill="#c8d1dc" font-size="9" font-weight="600">Auto-generated rules:</text>
+  <text x="220" y="335" fill="#c8d1dc" font-size="9">Client VLAN firewall rules are generated per-VLAN from client_vlans[].services in group_vars/all.yml.</text>
+  <text x="220" y="352" fill="#6b7a8d" font-size="9">Services map: nfs→tcp/2049, smb→tcp/445, iscsi→tcp/3260, ssh→tcp/22</text>
+  <text x="220" y="369" fill="#6b7a8d" font-size="9">Portal binding: each TPG bound to its VLAN VIP (not 0.0.0.0) — requires ip_nonlocal_bind=1</text>
+</svg>

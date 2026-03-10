@@ -1,0 +1,82 @@
+<svg viewBox="0 0 1050 520" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1050px;display:block;margin:0 auto;">
+  <text x="525" y="22" fill="#22d3ee" font-size="14" text-anchor="middle" font-weight="700">Client-Facing Service Architecture (Per-VLAN VIPs)</text>
+
+  <!-- ZFS Pool base -->
+  <rect x="50" y="440" width="950" height="50" rx="6" fill="#2dd4a022" stroke="#2dd4a0" stroke-width="1.5"/>
+  <text x="525" y="470" fill="#2dd4a0" font-size="12" text-anchor="middle" font-weight="600">ZFS Pool: san-pool (active node only)</text>
+
+  <!-- NFS column — VLAN 30 / vip-enduser -->
+  <rect x="60" y="50" width="280" height="370" rx="6" fill="#111820" stroke="#22d3ee" stroke-width="1"/>
+  <text x="200" y="75" fill="#22d3ee" font-size="12" text-anchor="middle" font-weight="600">NFS Service</text>
+
+  <rect x="85" y="92" width="230" height="35" rx="4" fill="#22d3ee22" stroke="#22d3ee"/>
+  <text x="200" y="111" fill="#22d3ee" font-size="10" text-anchor="middle" font-weight="500">vip-enduser: 10.30.30.10:2049</text>
+  <text x="200" y="123" fill="#6b7a8d" font-size="8" text-anchor="middle">VLAN 30 · Enduser network</text>
+
+  <rect x="85" y="142" width="230" height="55" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="200" y="162" fill="#c8d1dc" font-size="10" text-anchor="middle" font-weight="500">nfs-kernel-server</text>
+  <text x="200" y="180" fill="#6b7a8d" font-size="9" text-anchor="middle">NFSv4 with sec=krb5 or sec=sys</text>
+
+  <rect x="85" y="210" width="230" height="55" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="200" y="230" fill="#c8d1dc" font-size="9" text-anchor="middle">/etc/exports →</text>
+  <text x="200" y="245" fill="#6b7a8d" font-size="9" text-anchor="middle">/san-pool/cluster-config/nfs/exports</text>
+  <text x="200" y="258" fill="#6b7a8d" font-size="8" text-anchor="middle">(symlink on shared ZFS)</text>
+
+  <rect x="85" y="278" width="230" height="70" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="200" y="298" fill="#c8d1dc" font-size="9" text-anchor="middle" font-weight="500">Clients:</text>
+  <text x="200" y="313" fill="#6b7a8d" font-size="9" text-anchor="middle">K3s NFS CSI provisioner</text>
+  <text x="200" y="328" fill="#6b7a8d" font-size="9" text-anchor="middle">Proxmox shared storage</text>
+  <text x="200" y="343" fill="#6b7a8d" font-size="8" text-anchor="middle">Workstations (NFS mounts)</text>
+
+  <!-- SMB column — VLAN 30 / vip-enduser -->
+  <rect x="380" y="50" width="270" height="370" rx="6" fill="#111820" stroke="#22d3ee" stroke-width="1"/>
+  <text x="515" y="75" fill="#22d3ee" font-size="12" text-anchor="middle" font-weight="600">SMB Service</text>
+
+  <rect x="405" y="92" width="220" height="35" rx="4" fill="#22d3ee22" stroke="#22d3ee"/>
+  <text x="515" y="111" fill="#22d3ee" font-size="10" text-anchor="middle" font-weight="500">vip-enduser: 10.30.30.10:445</text>
+  <text x="515" y="123" fill="#6b7a8d" font-size="8" text-anchor="middle">VLAN 30 · Enduser network</text>
+
+  <rect x="405" y="142" width="220" height="55" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="515" y="162" fill="#c8d1dc" font-size="10" text-anchor="middle" font-weight="500">Samba (smbd)</text>
+  <text x="515" y="180" fill="#6b7a8d" font-size="9" text-anchor="middle">SMB3 with shadow_copy2 for snaps</text>
+
+  <rect x="405" y="210" width="220" height="55" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="515" y="230" fill="#c8d1dc" font-size="9" text-anchor="middle">smb.conf →</text>
+  <text x="515" y="245" fill="#6b7a8d" font-size="9" text-anchor="middle">/san-pool/cluster-config/samba/smb.conf</text>
+  <text x="515" y="258" fill="#6b7a8d" font-size="8" text-anchor="middle">(symlink on shared ZFS)</text>
+
+  <rect x="405" y="278" width="220" height="70" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="515" y="298" fill="#c8d1dc" font-size="9" text-anchor="middle" font-weight="500">Clients:</text>
+  <text x="515" y="313" fill="#6b7a8d" font-size="9" text-anchor="middle">Windows / macOS workstations</text>
+  <text x="515" y="328" fill="#6b7a8d" font-size="9" text-anchor="middle">Container shared data</text>
+
+  <!-- iSCSI column — VLAN 40 / vip-hypervisor -->
+  <rect x="690" y="50" width="310" height="370" rx="6" fill="#111820" stroke="#f59e42" stroke-width="1.5"/>
+  <text x="845" y="75" fill="#f59e42" font-size="12" text-anchor="middle" font-weight="600">iSCSI Target Service</text>
+
+  <rect x="715" y="92" width="260" height="35" rx="4" fill="#f59e4222" stroke="#f59e42"/>
+  <text x="845" y="111" fill="#f59e42" font-size="10" text-anchor="middle" font-weight="500">vip-hypervisor: 10.40.40.10:3260</text>
+  <text x="845" y="123" fill="#6b7a8d" font-size="8" text-anchor="middle">VLAN 40 · Hypervisor network</text>
+
+  <rect x="715" y="142" width="260" height="55" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="845" y="162" fill="#c8d1dc" font-size="10" text-anchor="middle" font-weight="500">LIO Target — per-VLAN TPGs</text>
+  <text x="845" y="178" fill="#6b7a8d" font-size="9" text-anchor="middle">Managed by sync-iscsi-luns + setup script</text>
+
+  <rect x="715" y="210" width="260" height="65" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="845" y="230" fill="#c8d1dc" font-size="9" text-anchor="middle">Exports ZFS zvols as LUNs</text>
+  <text x="845" y="245" fill="#6b7a8d" font-size="9" text-anchor="middle">san-pool/iscsi/hypervisor/*</text>
+  <text x="845" y="260" fill="#6b7a8d" font-size="8" text-anchor="middle">CHAP: per-initiator or per-TPG</text>
+  <text x="845" y="272" fill="#6b7a8d" font-size="8" text-anchor="middle">Creds: /root/.iscsi-chap.env.enc</text>
+
+  <rect x="715" y="288" width="260" height="60" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="845" y="308" fill="#c8d1dc" font-size="9" text-anchor="middle" font-weight="500">Clients:</text>
+  <text x="845" y="323" fill="#6b7a8d" font-size="9" text-anchor="middle">Proxmox VM disk images (ZFS plugin)</text>
+  <text x="845" y="338" fill="#6b7a8d" font-size="9" text-anchor="middle">K3s iSCSI CSI persistent volumes</text>
+
+  <!-- Arrows to pool -->
+  <line x1="200" y1="420" x2="200" y2="438" stroke="#2dd4a0" stroke-width="1.5" marker-end="url(#agr2)"/>
+  <line x1="515" y1="420" x2="515" y2="438" stroke="#2dd4a0" stroke-width="1.5" marker-end="url(#agr2)"/>
+  <line x1="845" y1="420" x2="845" y2="438" stroke="#2dd4a0" stroke-width="1.5" marker-end="url(#agr2)"/>
+
+  <defs><marker id="agr2" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><path d="M0,0 L7,2.5 L0,5" fill="#2dd4a0"/></marker></defs>
+</svg>
