@@ -151,14 +151,14 @@ After the manual steps are complete, run through this checklist:
 pcs status
 
 # Test planned failover (~5-8s)
-pcs resource move san-resources storage-b
-pcs resource clear san-resources
+pcs resource move san-services storage-b
+pcs resource clear san-services
 
 # Test unplanned failover (~10-12s) — PULL THE POWER CORD on active node
 # Verify clients reconnect within 15-25s total
 
-# Test STONITH
-stonith_admin -t fence_ipmilan -r -F storage-b  # dry run
+# Test STONITH (WARNING: this WILL power off the node — only run in maintenance)
+pcs stonith fence storage-b
 
 # Verify resilver after recovery
 zpool status san-pool
@@ -230,6 +230,11 @@ This playbook deploys comprehensive monitoring for both storage and cluster heal
 - `zfs_vdev_read_errors`, `zfs_vdev_write_errors`, `zfs_vdev_cksum_errors` - Per-vdev I/O errors
 - `zfs_resilver_in_progress`, `zfs_resilver_percent_complete` - Resilver status
 - `zfs_dataset_last_snapshot_seconds` - Timestamp of most recent Sanoid snapshot per dataset
+
+### Hardware Health Metrics (custom exporters, updated every 5 min)
+- `smart_*` - SMART disk health metrics (smart-exporter, storage nodes only)
+- `ras_*` - RAS/ECC hardware error metrics (ras-exporter, storage nodes only)
+- `hwtemp_*` - Hardware temperature sensor metrics (hwtemp-exporter, storage nodes only)
 
 ### STONITH Probe Metrics (stonith-probe exporter, updated every 2 min)
 - `stonith_agent_reachable` - Whether each fence agent IP is pingable (storage nodes only)
