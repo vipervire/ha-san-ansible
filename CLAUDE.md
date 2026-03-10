@@ -1,4 +1,8 @@
-# HA SAN Ansible — Development Guidelines
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
 
 Ansible playbook for HA ZFS-over-iSCSI SAN (Debian 12, Ubuntu 22.04/24.04, Rocky Linux 9, AlmaLinux 9). Two storage nodes + quorum. Pacemaker active/passive HA; ZFS mirrors local disks with peer's iSCSI-exported disks.
 
@@ -14,6 +18,11 @@ Ansible playbook for HA ZFS-over-iSCSI SAN (Debian 12, Ubuntu 22.04/24.04, Rocky
 | iSCSI LUN sync script | `roles/services/templates/sync-iscsi-luns.sh.j2` |
 | Pacemaker resource config | `roles/pacemaker/templates/configure-resources.sh.j2` |
 
+## Inventory Groups
+
+- `cluster` — all 3 nodes (common, hardening, pacemaker, monitoring plays)
+- `storage_nodes` — storage-a + storage-b only (ZFS, iSCSI, services, cockpit plays)
+
 ## Playbook Commands
 
 ```bash
@@ -23,7 +32,21 @@ ansible-playbook -i inventory.yml site.yml --tags cluster     # Pacemaker only
 ansible-playbook -i inventory.yml site.yml --tags services    # NFS/SMB/iSCSI services
 ansible-playbook -i inventory.yml site.yml --tags monitoring  # exporters only
 ansible-playbook -i inventory.yml site.yml --check --diff     # dry run
+ansible-playbook -i inventory.yml verify.yml                  # post-deploy health check (read-only)
 ```
+
+The first three plays in `site.yml` use `tags: always` — credential validation, cluster pre-check, and OS assertion run regardless of any `--tags` filter. Skip the cluster pre-check with `-e skip_cluster_check=true` on first deploy.
+
+## Testing
+
+```bash
+cd molecule/default
+molecule converge   # deploy to Docker containers
+molecule verify     # run read-only checks
+molecule test       # full converge + verify + destroy cycle
+```
+
+Molecule only tests `common` and `hardening` — ZFS, iSCSI, and Pacemaker require real hardware and are excluded from automated testing.
 
 ## Development Rules
 
