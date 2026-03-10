@@ -382,13 +382,13 @@ Example `client_vlans` entry in `group_vars/all.yml`:
 ```yaml
 client_vlans:
   - name: enduser
-    vlan_id: 30
+    id: 30
     subnet: 10.30.30.0/24
     vip: 10.30.30.10
     services: [nfs, smb]
 
   - name: hypervisor
-    vlan_id: 40
+    id: 40
     subnet: 10.40.40.0/24
     vip: 10.40.40.10
     services: [iscsi, ssh]

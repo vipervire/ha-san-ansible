@@ -355,7 +355,7 @@ Key NFS security decisions: use `root_squash` (maps root on clients to nobody) u
 ```ini
 # /san-pool/cluster-config/samba/smb.conf — security-relevant settings
 [global]
-    interfaces = 10.30.30.11
+    interfaces = 10.30.30.10
     bind interfaces only = yes
 
     # Disable SMBv1 — seriously
@@ -514,7 +514,7 @@ zfs create -o encryption=aes-256-gcm -o keyformat=raw \
 
 ```bash
 # Sensitive files that contain credentials
-chmod 600 /etc/target/saveconfig.json     # LIO target config (CHAP passwords)
+chmod 600 /etc/target/saveconfig.json     # LIO target persistence config (no plaintext credentials — those live in /root/.iscsi-chap.env.enc)
 chmod 600 /etc/iscsi/iscsid.conf          # iSCSI initiator config (CHAP passwords)
 chmod 600 /etc/corosync/authkey           # Corosync cluster auth key
 chmod 640 /etc/samba/smb.conf             # Samba config
@@ -653,8 +653,8 @@ When the time comes, the migration is contained:
 
 ### Before going live
 
-1. Deploy via Ansible: `ansible-playbook -i inventory.yml site.yml`. The pre-flight play blocks deployment if any credential contains `CHANGEME`. Skip the cluster pre-check on first deploy with `-e skip_cluster_check=true`. Run `ansible-playbook -i inventory.yml verify.yml` for a post-deploy health check (read-only).
-2. Install the chosen OS (Debian 12, Ubuntu 22.04/24.04, Rocky Linux 9, or AlmaLinux 9) minimal on both storage nodes + quorum. Boot drives should be mirrored (mdraid or ZFS) and separate from data pool disks.
+1. Install the chosen OS (Debian 12, Ubuntu 22.04/24.04, Rocky Linux 9, or AlmaLinux 9) minimal on both storage nodes + quorum. Boot drives should be mirrored (mdraid or ZFS) and separate from data pool disks.
+2. Deploy via Ansible: `ansible-playbook -i inventory.yml site.yml`. The pre-flight play blocks deployment if any credential contains `CHANGEME`. Skip the cluster pre-check on first deploy with `-e skip_cluster_check=true`. Run `ansible-playbook -i inventory.yml verify.yml` for a post-deploy health check (read-only).
 3. Configure VLANs, assign IPs, verify jumbo frames end-to-end with `ping -M do -s 8972` on the storage interconnect.
 4. Apply OS hardening: SSH keys only, nftables, sysctl, disable unnecessary services, configure unattended security updates.
 5. Set up LIO targets and open-iscsi initiators. Verify cross-node LUN visibility. Confirm stable `/dev/disk/by-path/` naming survives reboots.

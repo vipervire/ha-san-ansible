@@ -23,6 +23,9 @@
   <rect x="560" y="182" width="160" height="26" rx="3" fill="#1a2230" stroke="#a78bfa" stroke-width="1"/>
   <text x="640" y="200" fill="#a78bfa" font-size="10" text-anchor="middle">quorum: 10.20.20.3/24</text>
 
+  <rect x="760" y="182" width="200" height="26" rx="3" fill="#a78bfa22" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="860" y="200" fill="#a78bfa" font-size="10" text-anchor="middle" font-weight="600">vip-cockpit: 10.20.20.10</text>
+
   <line x1="240" y1="195" x2="320" y2="195" stroke="#a78bfa" stroke-width="1.5"/>
   <line x1="480" y1="195" x2="560" y2="195" stroke="#a78bfa" stroke-width="1.5"/>
 
