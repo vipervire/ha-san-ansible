@@ -25,6 +25,7 @@ This guide walks through a first deployment of the HA ZFS-over-iSCSI SAN from sc
 ```bash
 git clone <repository-url> ha-san-ansible
 cd ha-san-ansible
+python3 -m venv .venv && source .venv/bin/activate
 pip install ansible
 ansible-galaxy install -r requirements.yml   # if present
 ```
@@ -142,6 +143,14 @@ See `docs/variables.md` for the full list of per-VLAN fields.
 
 **Corosync** — leave the defaults unless you have specific latency requirements. Do not set `corosync_token` below 3000.
 
+**NTP** — leave `ntp_servers: []` to use OS-default pools, or set explicit servers for internal NTP infrastructure:
+
+```yaml
+ntp_servers:
+  - "10.20.20.50"
+  - "10.20.20.51"
+```
+
 **SSH allowed users** — add any additional admin accounts:
 
 ```yaml
@@ -172,6 +181,8 @@ If you use bonding or have a single NIC, the same interface can serve multiple r
 ---
 
 ## Step 5: Configure iSCSI Backend Replication
+
+> **Vault your secrets before committing.** Steps 5 and 6 introduce credentials. If you commit intermediate files before vaulting (Step 9), those passwords will remain in git history even after vaulting. Complete Step 9 before making any git commits that touch `iscsi.yml` or `cluster.yml`.
 
 Edit `group_vars/storage_nodes/iscsi.yml`.
 

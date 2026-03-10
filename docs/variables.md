@@ -122,6 +122,8 @@ Defined in `group_vars/all.yml` and `roles/hardening/defaults/main.yml`.
 | `watchdog_max_load` | `24.0` | float | Reboot if 1-minute load exceeds this value |
 | `watchdog_min_memory` | `1` | int (MB) | Reboot if free memory drops below this value |
 
+> **Note:** Only `watchdog_enabled` and `watchdog_module` are formally set in `roles/hardening/defaults/main.yml`. The remaining variables (`watchdog_device`, `watchdog_timeout`, `watchdog_interval`, `watchdog_max_load`, `watchdog_min_memory`) are commented-out placeholders in `group_vars/all.yml`. The defaults shown above are the recommended template values from the watchdog daemon documentation — they are not active Ansible defaults until you uncomment and set them.
+
 All watchdog variables can be overridden per-node in `host_vars/<node>.yml`.
 
 ---
@@ -297,7 +299,7 @@ See `docs/stonith-smart-plugs.md` for per-method setup guides.
 
 ## Monitoring
 
-Defined in `group_vars/storage_nodes/cluster.yml` and `roles/monitoring/defaults/main.yml`.
+Cluster exporter variables (`ha_cluster_monitoring_enabled`, `ha_cluster_exporter_port`, `ha_cluster_exporter_address`) are defined in `group_vars/all.yml` — they apply to all cluster nodes. Storage-specific exporter flags (`smart_monitoring_enabled`, `zfs_scrub_monitoring_enabled`, `ras_monitoring_enabled`) are defined in `group_vars/storage_nodes/cluster.yml`. Role defaults for all monitoring vars live in `roles/monitoring/defaults/main.yml`.
 
 | Variable | Default | Type | Description |
 |----------|---------|------|-------------|
