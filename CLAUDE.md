@@ -100,6 +100,7 @@ Each iSCSI-enabled client VLAN gets its own LIO TPG. Per-VLAN fields in `client_
 - Single-VLAN: both fields optional (fall back to `iscsi_client_acls` / `iscsi_client_zvol_dataset`)
 - Backstore naming: single-VLAN = `<zvol>`, multi-VLAN = `<vlan>-<zvol>` (prevents VMID collisions)
 - Template fails at deploy time if multi-VLAN config is missing required fields
+- `generate_node_acls: true` — sets `generate_node_acls=1` + `demo_mode_write_protect=0` on the VLAN's TPG; required for Proxmox ZFS-over-iSCSI plugin (which doesn't support per-IQN ACLs). When set, `iscsi_acls` is not required and no individual ACL entries are created. CHAP still works — credentials are set at TPG level (shared by all initiators). `sync-iscsi-luns.sh` skips ACL sync for this TPG.
 
 ### iSCSI LUN Auto-Sync
 

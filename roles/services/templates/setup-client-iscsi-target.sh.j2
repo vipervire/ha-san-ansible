@@ -15,7 +15,9 @@ set -euo pipefail
 {# Validate multi-VLAN config at template render time — fail clearly rather than silently wrong #}
 {% if iscsi_vlan_count > 1 %}
 {%   for cv in iscsi_vlans %}
-{%     set _acl_check = cv.iscsi_acls | mandatory("client_vlans['" ~ cv.name ~ "'].iscsi_acls is required when multiple VLANs have iSCSI service (prevents cross-VLAN access)") %}
+{%     if not (cv.generate_node_acls | default(false)) %}
+{%       set _acl_check = cv.iscsi_acls | mandatory("client_vlans['" ~ cv.name ~ "'].iscsi_acls is required when multiple VLANs have iSCSI service and generate_node_acls is not true (prevents cross-VLAN access)") %}
+{%     endif %}
 {%     set _ds_check  = cv.iscsi_dataset | mandatory("client_vlans['" ~ cv.name ~ "'].iscsi_dataset is required when multiple VLANs have iSCSI service (prevents LUN namespace collisions)") %}
 {%   endfor %}
 {% endif %}
@@ -45,7 +47,10 @@ targetcli /iscsi/"${TARGET_IQN}"/tpg1/portals delete 0.0.0.0 3260 2>/dev/null ||
 # ─── Per-VLAN TPG configuration ───────────────────────────────────────────────
 {% for cv in iscsi_vlans %}
 {% set tpg_num = loop.index %}
+{% set vlan_generate_node_acls = cv.generate_node_acls | default(false) %}
+{% if not vlan_generate_node_acls %}
 {% set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
+{% endif %}
 
 echo ""
 echo "--- TPG{{ tpg_num }}: VLAN={{ cv.name }}, VIP={{ cv.vip }} ---"
@@ -84,8 +89,14 @@ while IFS= read -r portal_ip; do
 done < <(targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/portals/ 2>/dev/null \
   | grep -oP '(?<=o- )\d+\.\d+\.\d+\.\d+' || true)
 
+{% if vlan_generate_node_acls %}
+# Proxmox compatibility — allow any initiator (no explicit ACLs)
+targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute generate_node_acls=1
+targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute demo_mode_write_protect=0
+{% else %}
 # Enforce ACL-based access control (no auto-generated ACLs)
 targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute generate_node_acls=0
+{% endif %}
 {% if (cv.iscsi_chap_enabled is defined and cv.iscsi_chap_enabled) or (iscsi_client_chap_enabled | default(false)) %}
 # Enable CHAP authentication for this VLAN
 targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute authentication=1
@@ -97,6 +108,7 @@ targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute authentication=0
 # Enable the TPG (responds to initiator connections and SendTargets discovery)
 targetcli /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }} set attribute tpg_enabled=1 2>/dev/null || true
 
+{% if not vlan_generate_node_acls %}
 # Add missing ACLs for this VLAN
 {% for initiator_iqn in vlan_acls %}
 if ! targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls/{{ initiator_iqn }} &>/dev/null; then
@@ -132,6 +144,14 @@ while IFS= read -r existing_iqn; do
   fi
 done < <(targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls/ 2>/dev/null \
   | grep -oP '(?<=o- )iqn\.[^\s]+' || true)
+{% elif (cv.iscsi_chap_enabled is defined and cv.iscsi_chap_enabled) or (iscsi_client_chap_enabled | default(false)) %}
+# TPG-level CHAP — all initiators use the same credentials (generate_node_acls mode)
+{% set chap_user = cv.iscsi_chap_user | default(iscsi_client_chap_user) %}
+{% set chap_pass = cv.iscsi_chap_password | default(iscsi_client_chap_password) %}
+_chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }} set auth userid={{ chap_user }} password={{ chap_pass }}"
+targetcli <<< "$_chap_cmd"
+unset _chap_cmd
+{% endif %}
 {% endfor %}
 
 # ─── Warn about stale TPGs (beyond current VLAN count) ────────────────────────
@@ -155,6 +175,7 @@ done
 ACLS_DIR="/{{ zfs_pool_name }}/cluster-config/iscsi"
 mkdir -p "${ACLS_DIR}"
 {% for cv in iscsi_vlans %}
+{% if not (cv.generate_node_acls | default(false)) %}
 {% set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
 cat > "${ACLS_DIR}/acls-{{ cv.name }}.conf" <<'ACLS_{{ cv.name | upper }}_EOF'
 # Managed by Ansible — iSCSI initiator ACLs for VLAN: {{ cv.name }} (TPG{{ loop.index }})
@@ -166,6 +187,7 @@ cat > "${ACLS_DIR}/acls-{{ cv.name }}.conf" <<'ACLS_{{ cv.name | upper }}_EOF'
 ACLS_{{ cv.name | upper }}_EOF
 chmod 0640 "${ACLS_DIR}/acls-{{ cv.name }}.conf"
 echo "ACL list seeded at ${ACLS_DIR}/acls-{{ cv.name }}.conf"
+{% endif %}
 {% endfor %}
 
 # Write legacy union acls.conf for backward compatibility (all VLANs combined)
@@ -173,11 +195,13 @@ cat > "${ACLS_DIR}/acls.conf" <<'UNION_ACLS_EOF'
 # Managed by Ansible — union ACL list (all iSCSI VLANs combined)
 # Per-VLAN files: acls-<vlan-name>.conf (preferred for per-VLAN sync)
 {% for cv in iscsi_vlans %}
+{% if not (cv.generate_node_acls | default(false)) %}
 {% set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
 # VLAN: {{ cv.name }} (TPG{{ loop.index }})
 {% for initiator_iqn in vlan_acls %}
 {{ initiator_iqn }}
 {% endfor %}
+{% endif %}
 {% endfor %}
 UNION_ACLS_EOF
 chmod 0640 "${ACLS_DIR}/acls.conf"

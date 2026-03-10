@@ -55,6 +55,9 @@ client_vlans:
     description: "Hypervisor iSCSI"
     # Per-VLAN iSCSI ACLs — required when multiple VLANs use iSCSI service.
     # When only one VLAN has iSCSI, falls back to iscsi_client_acls in iscsi.yml.
+    # generate_node_acls: true  — allow any initiator (required for Proxmox ZFS-over-iSCSI plugin).
+    # Sets generate_node_acls=1 + demo_mode_write_protect=0 on this VLAN's TPG.
+    # When true, iscsi_acls is not required and individual ACL entries are not created.
     iscsi_acls:
       - "{{ iscsi_iqn_prefix }}:proxmox-a"
       - "{{ iscsi_iqn_prefix }}:proxmox-b"

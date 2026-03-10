@@ -29,11 +29,12 @@ TOTAL_TPGS={{ iscsi_vlan_count }}
 # Single-VLAN deployments use no backstore prefix (backward-compatible with
 # zvols created before per-VLAN TPGs). Multi-VLAN uses <vlan>- prefix to
 # prevent VMID collisions (e.g. two Proxmox clusters both creating vm-100-disk-0).
-declare -A TPG_DATASET TPG_VLAN TPG_BS_PREFIX
+declare -A TPG_DATASET TPG_VLAN TPG_BS_PREFIX TPG_GEN_ACLS
 {% for cv in iscsi_vlans %}
 TPG_DATASET[{{ loop.index }}]="{{ cv.iscsi_dataset | default(iscsi_client_zvol_dataset) }}"
 TPG_VLAN[{{ loop.index }}]="{{ cv.name }}"
 TPG_BS_PREFIX[{{ loop.index }}]="{{ (cv.name + '-') if iscsi_vlan_count > 1 else '' }}"
+TPG_GEN_ACLS[{{ loop.index }}]="{{ 'true' if (cv.generate_node_acls | default(false)) else 'false' }}"
 {% endfor %}
 
 echo "=== Syncing iSCSI LUNs for target: ${TARGET_IQN} ==="
@@ -197,6 +198,10 @@ ACLS_DIR="/{{ zfs_pool_name }}/cluster-config/iscsi"
 
 for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
     vlan_name="${TPG_VLAN[$tpg_tag]}"
+    if [ "${TPG_GEN_ACLS[$tpg_tag]}" = "true" ]; then
+        echo "  (tpg${tpg_tag}/VLAN=${vlan_name}: generate_node_acls — skipping ACL sync)"
+        continue
+    fi
     acl_file="${ACLS_DIR}/acls-${vlan_name}.conf"
 
     if [ ! -f "$acl_file" ]; then
