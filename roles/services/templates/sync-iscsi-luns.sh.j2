@@ -29,12 +29,24 @@ TOTAL_TPGS={{ iscsi_vlan_count }}
 # Single-VLAN deployments use no backstore prefix (backward-compatible with
 # zvols created before per-VLAN TPGs). Multi-VLAN uses <vlan>- prefix to
 # prevent VMID collisions (e.g. two Proxmox clusters both creating vm-100-disk-0).
-declare -A TPG_DATASET TPG_VLAN TPG_BS_PREFIX
+declare -A TPG_DATASET TPG_VLAN TPG_BS_PREFIX TPG_GEN_ACLS
 {% for cv in iscsi_vlans %}
 TPG_DATASET[{{ loop.index }}]="{{ cv.iscsi_dataset | default(iscsi_client_zvol_dataset) }}"
 TPG_VLAN[{{ loop.index }}]="{{ cv.name }}"
 TPG_BS_PREFIX[{{ loop.index }}]="{{ (cv.name + '-') if iscsi_vlan_count > 1 else '' }}"
+TPG_GEN_ACLS[{{ loop.index }}]="{{ 'true' if (cv.generate_node_acls | default(false)) else 'false' }}"
 {% endfor %}
+
+# ─── Decrypt CHAP credentials ─────────────────────────────────────────────
+# CHAP_USER["tpg:iqn"] / CHAP_PASS["tpg:iqn"] — per-initiator (ACL-mode VLANs)
+# TPG_CHAP_USER["tpg"] / TPG_CHAP_PASS["tpg"] — per-TPG (generate_node_acls VLANs)
+declare -A CHAP_USER CHAP_PASS TPG_CHAP_USER TPG_CHAP_PASS
+if [ -f /root/.iscsi-chap.env.enc ]; then
+  eval "$(openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/etc/machine-id \
+    -in /root/.iscsi-chap.env.enc 2>/dev/null)" || {
+    echo "WARNING: Failed to decrypt CHAP credentials — CHAP will not be applied"
+  }
+fi
 
 echo "=== Syncing iSCSI LUNs for target: ${TARGET_IQN} ==="
 {% for cv in iscsi_vlans %}
@@ -119,6 +131,10 @@ fi
 # ─── Collect all changes; apply in a single targetcli batch ───────────────────
 # Reduces N separate process spawns (one per zvol/ACL) to exactly 1.
 COMMANDS=()
+# CHAP_TARGETS holds "tpg:iqn" keys (no credential values) for ACLs that need
+# per-initiator CHAP applied. Applied in a second pass after Phase 4 so the
+# ACL path exists before the set auth command runs.
+CHAP_TARGETS=()
 
 # ─── Phase 2: Per-TPG zvol scanning ───────────────────────────────────────────
 for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
@@ -197,6 +213,21 @@ ACLS_DIR="/{{ zfs_pool_name }}/cluster-config/iscsi"
 
 for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
     vlan_name="${TPG_VLAN[$tpg_tag]}"
+    if [ "${TPG_GEN_ACLS[$tpg_tag]}" = "true" ]; then
+        echo "  (tpg${tpg_tag}/VLAN=${vlan_name}: generate_node_acls — skipping ACL sync)"
+        # Apply TPG-level CHAP if credentials are available.
+        # Sent directly via herestring (not batched through COMMANDS) so credential
+        # values are never held as plaintext strings in the array.
+        # NOTE: set -x must not be used in wrapper scripts — it would expose credentials.
+        if [[ "${TPG_CHAP_USER[$tpg_tag]+_}" ]]; then
+            echo "  + Setting TPG-level CHAP and authentication=1 for tpg${tpg_tag}"
+            targetcli <<< "/iscsi/${TARGET_IQN}/tpg${tpg_tag} set attribute authentication=1"
+            _chap_cmd="/iscsi/${TARGET_IQN}/tpg${tpg_tag} set auth userid=${TPG_CHAP_USER[$tpg_tag]} password=${TPG_CHAP_PASS[$tpg_tag]}"
+            targetcli <<< "$_chap_cmd"
+            unset _chap_cmd
+        fi
+        continue
+    fi
     acl_file="${ACLS_DIR}/acls-${vlan_name}.conf"
 
     if [ ! -f "$acl_file" ]; then
@@ -224,6 +255,12 @@ for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
         if [[ "${DESIRED_SET[$iqn]+_}" ]] && [[ ! "${EXISTING_ACLS[$acl_key]+_}" ]]; then
             echo "  + Adding ACL to tpg${tpg_tag}: ${iqn}"
             COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/acls create ${iqn}")
+            # Queue for CHAP application after Phase 4 (ACL must exist first).
+            # Only the tpg:iqn key is stored — no credential values in the array.
+            chap_key="${tpg_tag}:${iqn}"
+            if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
+                CHAP_TARGETS+=("${tpg_tag}:${iqn}")
+            fi
         fi
     done
 
@@ -246,4 +283,31 @@ if [ ${#COMMANDS[@]} -gt 0 ]; then
     echo "=== LIO configuration saved ==="
 else
     echo "=== No changes needed — all LUNs and ACLs in sync ==="
+fi
+
+# ─── Phase 5: Apply per-initiator CHAP credentials ────────────────────────────
+# Run after Phase 4 so ACL paths created above are guaranteed to exist.
+# Credentials are never stored in the COMMANDS array — each command is issued
+# via herestring and the variable is immediately unset.
+# NOTE: set -x must not be used in wrapper scripts — it would expose credentials.
+if [ ${#CHAP_TARGETS[@]} -gt 0 ]; then
+    echo ""
+    echo "--- Phase 5: Per-initiator CHAP credentials ---"
+    chap_changed=false
+    for chap_target in "${CHAP_TARGETS[@]}"; do
+        _tpg="${chap_target%%:*}"
+        _iqn="${chap_target#*:}"
+        chap_key="${_tpg}:${_iqn}"
+        if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
+            echo "  + Setting CHAP credentials for tpg${_tpg}: ${_iqn}"
+            _chap_cmd="/iscsi/${TARGET_IQN}/tpg${_tpg}/acls/${_iqn} set auth userid=${CHAP_USER[$chap_key]} password=${CHAP_PASS[$chap_key]}"
+            targetcli <<< "$_chap_cmd"
+            unset _chap_cmd
+            chap_changed=true
+        fi
+    done
+    if [ "$chap_changed" = "true" ]; then
+        targetcli saveconfig
+        echo "=== CHAP credentials applied and configuration saved ==="
+    fi
 fi

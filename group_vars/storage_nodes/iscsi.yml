@@ -43,6 +43,11 @@ iscsi_client_iqn: "{{ iscsi_iqn_prefix }}:san-client-target"
 # has no per-VLAN iscsi_acls defined. When multiple VLANs use iSCSI, set
 # iscsi_acls per-VLAN in client_vlans — this list is ignored (multi-VLAN requires
 # explicit per-VLAN ACLs to prevent cross-VLAN access).
+# Supports plain IQN strings (no CHAP) or dicts with per-initiator CHAP credentials:
+#   - iqn: "iqn.2025-01.lab.home:proxmox-a"
+#     chap_user: "proxmox-a"
+#     chap_password: !vault |...
+# CHAP is implicit: credentials present = authentication=1; no credentials = authentication=0.
 iscsi_client_acls:
   - "{{ iscsi_iqn_prefix }}:proxmox-a"
   - "{{ iscsi_iqn_prefix }}:proxmox-b"

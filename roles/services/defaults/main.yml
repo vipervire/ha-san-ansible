@@ -16,11 +16,6 @@ smb_min_protocol: "SMB3"
 smb_signing: "required"
 smb_encrypt: "required"
 
-# Client-facing iSCSI target CHAP (opt-in)
-iscsi_client_chap_enabled: false
-iscsi_client_chap_user: ""
-iscsi_client_chap_password: ""
-
 # iSCSI LUN auto-sync — dataset under which zvols are auto-mapped as LUNs.
 # All zvols directly under <pool>/<dataset>/ are discovered and exported.
 # Zvols can be created by any method: Houston Cockpit UI, ZFS-over-iSCSI
