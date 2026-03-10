@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(zpool status:*)",
-      "WebFetch(domain:github.com)",
-      "Bash(python3:*)"
-    ]
-  }
-}
