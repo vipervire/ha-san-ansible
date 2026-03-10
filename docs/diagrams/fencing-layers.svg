@@ -1,0 +1,59 @@
+<svg viewBox="0 0 1050 300" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1050px;display:block;margin:0 auto;">
+  <text x="525" y="25" fill="#ef5350" font-size="14" text-anchor="middle" font-weight="700">Four Layers of Split-Brain Prevention</text>
+
+  <!-- Layer 1 -->
+  <rect x="30" y="50" width="230" height="120" rx="6" fill="#a78bfa22" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="145" y="74" fill="#a78bfa" font-size="11" text-anchor="middle" font-weight="600">Layer 1: Quorum</text>
+  <text x="145" y="96" fill="#c8d1dc" font-size="9" text-anchor="middle">3-node Corosync ring</text>
+  <text x="145" y="112" fill="#c8d1dc" font-size="9" text-anchor="middle">Majority vote required (2/3)</text>
+  <text x="145" y="128" fill="#c8d1dc" font-size="9" text-anchor="middle">Partitioned node loses quorum</text>
+  <text x="145" y="148" fill="#6b7a8d" font-size="9" text-anchor="middle">→ Stops all resources</text>
+
+  <!-- Layer 2 -->
+  <rect x="280" y="50" width="230" height="120" rx="6" fill="#ef535022" stroke="#ef5350" stroke-width="1.5"/>
+  <text x="395" y="74" fill="#ef5350" font-size="11" text-anchor="middle" font-weight="600">Layer 2: STONITH</text>
+  <text x="395" y="96" fill="#c8d1dc" font-size="9" text-anchor="middle">Smart plug / IPMI power fence</text>
+  <text x="395" y="112" fill="#c8d1dc" font-size="9" text-anchor="middle">Hard power-off of failed node</text>
+  <text x="395" y="128" fill="#c8d1dc" font-size="9" text-anchor="middle">Guaranteed: no zombie writes</text>
+  <text x="395" y="148" fill="#6b7a8d" font-size="9" text-anchor="middle">→ Hardware-level guarantee</text>
+
+  <!-- Layer 3 -->
+  <rect x="530" y="50" width="230" height="120" rx="6" fill="#2dd4a022" stroke="#2dd4a0" stroke-width="1.5"/>
+  <text x="645" y="74" fill="#2dd4a0" font-size="11" text-anchor="middle" font-weight="600">Layer 3: ZFS multihost</text>
+  <text x="645" y="96" fill="#c8d1dc" font-size="9" text-anchor="middle">multihost=on property</text>
+  <text x="645" y="112" fill="#c8d1dc" font-size="9" text-anchor="middle">Activity check before import</text>
+  <text x="645" y="128" fill="#c8d1dc" font-size="9" text-anchor="middle">Refuses import if active writer</text>
+  <text x="645" y="148" fill="#6b7a8d" font-size="9" text-anchor="middle">→ ZFS-level last resort</text>
+
+  <!-- Layer 4 -->
+  <rect x="780" y="50" width="240" height="120" rx="6" fill="#f59e4222" stroke="#f59e42" stroke-width="1.5"/>
+  <text x="900" y="74" fill="#f59e42" font-size="11" text-anchor="middle" font-weight="600">Layer 4: iSCSI timeout</text>
+  <text x="900" y="96" fill="#c8d1dc" font-size="9" text-anchor="middle">replacement_timeout = 5s</text>
+  <text x="900" y="112" fill="#c8d1dc" font-size="9" text-anchor="middle">Dead peer's LUNs fail fast</text>
+  <text x="900" y="128" fill="#c8d1dc" font-size="9" text-anchor="middle">ZFS degrades mirror quickly</text>
+  <text x="900" y="148" fill="#6b7a8d" font-size="9" text-anchor="middle">→ Prevents hung I/O</text>
+
+  <!-- Timeline -->
+  <text x="525" y="210" fill="#c8d1dc" font-size="12" text-anchor="middle" font-weight="600">Failure Detection Timeline</text>
+  <line x1="80" y1="230" x2="970" y2="230" stroke="#2a3545" stroke-width="2"/>
+
+  <circle cx="120" cy="230" r="5" fill="#ef5350"/>
+  <text x="120" y="255" fill="#ef5350" font-size="9" text-anchor="middle" font-weight="500">0s</text>
+  <text x="120" y="270" fill="#6b7a8d" font-size="8" text-anchor="middle">Node fails</text>
+
+  <circle cx="300" cy="230" r="5" fill="#f59e42"/>
+  <text x="300" y="255" fill="#f59e42" font-size="9" text-anchor="middle" font-weight="500">~4s</text>
+  <text x="300" y="270" fill="#6b7a8d" font-size="8" text-anchor="middle">iSCSI LUNs fault</text>
+
+  <circle cx="500" cy="230" r="5" fill="#a78bfa"/>
+  <text x="500" y="255" fill="#a78bfa" font-size="9" text-anchor="middle" font-weight="500">~4-5s</text>
+  <text x="500" y="270" fill="#6b7a8d" font-size="8" text-anchor="middle">Corosync detects loss</text>
+
+  <circle cx="680" cy="230" r="5" fill="#ef5350"/>
+  <text x="680" y="255" fill="#ef5350" font-size="9" text-anchor="middle" font-weight="500">~6-8s</text>
+  <text x="680" y="270" fill="#6b7a8d" font-size="8" text-anchor="middle">STONITH fires</text>
+
+  <circle cx="850" cy="230" r="5" fill="#2dd4a0"/>
+  <text x="850" y="255" fill="#2dd4a0" font-size="9" text-anchor="middle" font-weight="500">~10-12s</text>
+  <text x="850" y="270" fill="#6b7a8d" font-size="8" text-anchor="middle">Services live on standby</text>
+</svg>

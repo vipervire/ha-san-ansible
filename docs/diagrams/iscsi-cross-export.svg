@@ -1,0 +1,77 @@
+<svg viewBox="0 0 1050 340" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1050px;display:block;margin:0 auto;">
+  <!-- Node A -->
+  <rect x="30" y="20" width="440" height="300" rx="6" fill="#111820" stroke="#2a3545" stroke-width="1"/>
+  <text x="50" y="48" fill="#2dd4a0" font-size="12" font-weight="600">NODE A — storage-a</text>
+
+  <!-- Local disks -->
+  <rect x="50" y="65" width="160" height="55" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="130" y="87" fill="#c8d1dc" font-size="10" text-anchor="middle" font-weight="500">Local SSDs</text>
+  <text x="130" y="103" fill="#6b7a8d" font-size="9" text-anchor="middle">sda..sdl (12 disks)</text>
+
+  <!-- LIO target -->
+  <rect x="260" y="65" width="180" height="55" rx="4" fill="#3d8bfd22" stroke="#3d8bfd"/>
+  <text x="350" y="87" fill="#3d8bfd" font-size="10" text-anchor="middle" font-weight="500">LIO Target (kernel)</text>
+  <text x="350" y="103" fill="#6b7a8d" font-size="9" text-anchor="middle">iqn....:storage-a</text>
+
+  <!-- Arrow local disks → LIO -->
+  <line x1="210" y1="92" x2="258" y2="92" stroke="#3d8bfd" stroke-width="1.5" marker-end="url(#aBlu)"/>
+  <text x="234" y="84" fill="#6b7a8d" font-size="8" text-anchor="middle">export</text>
+
+  <!-- open-iscsi initiator -->
+  <rect x="50" y="150" width="180" height="45" rx="4" fill="#3d8bfd22" stroke="#3d8bfd"/>
+  <text x="140" y="177" fill="#3d8bfd" font-size="10" text-anchor="middle" font-weight="500">open-iscsi initiator</text>
+
+  <!-- Remote LUNs appear as -->
+  <rect x="50" y="220" width="180" height="45" rx="4" fill="#f59e4222" stroke="#f59e42"/>
+  <text x="140" y="240" fill="#f59e42" font-size="10" text-anchor="middle" font-weight="500">Remote LUNs from B</text>
+  <text x="140" y="255" fill="#6b7a8d" font-size="9" text-anchor="middle">sdm..sdx (12 iSCSI devs)</text>
+
+  <line x1="140" y1="195" x2="140" y2="218" stroke="#f59e42" stroke-width="1.5" marker-end="url(#aOrg)"/>
+
+  <!-- ZFS sees both -->
+  <rect x="50" y="280" width="400" height="30" rx="4" fill="#2dd4a022" stroke="#2dd4a0"/>
+  <text x="250" y="300" fill="#2dd4a0" font-size="10" text-anchor="middle" font-weight="500">ZFS sees: 12 local + 12 remote = 24 devices → 12 mirror vdevs</text>
+
+  <line x1="130" y1="120" x2="130" y2="148" stroke="#c8d1dc" stroke-width="1" stroke-dasharray="3,2"/>
+  <line x1="250" y1="265" x2="250" y2="278" stroke="#2dd4a0" stroke-width="1"/>
+
+  <!-- Node B -->
+  <rect x="580" y="20" width="440" height="300" rx="6" fill="#111820" stroke="#2a3545" stroke-width="1"/>
+  <text x="600" y="48" fill="#f59e42" font-size="12" font-weight="600">NODE B — storage-b</text>
+
+  <rect x="600" y="65" width="160" height="55" rx="4" fill="#1a2230" stroke="#2a3545"/>
+  <text x="680" y="87" fill="#c8d1dc" font-size="10" text-anchor="middle" font-weight="500">Local SSDs</text>
+  <text x="680" y="103" fill="#6b7a8d" font-size="9" text-anchor="middle">sda..sdl (12 disks)</text>
+
+  <rect x="810" y="65" width="180" height="55" rx="4" fill="#3d8bfd22" stroke="#3d8bfd"/>
+  <text x="900" y="87" fill="#3d8bfd" font-size="10" text-anchor="middle" font-weight="500">LIO Target (kernel)</text>
+  <text x="900" y="103" fill="#6b7a8d" font-size="9" text-anchor="middle">iqn....:storage-b</text>
+
+  <line x1="760" y1="92" x2="808" y2="92" stroke="#3d8bfd" stroke-width="1.5" marker-end="url(#aBlu)"/>
+  <text x="784" y="84" fill="#6b7a8d" font-size="8" text-anchor="middle">export</text>
+
+  <rect x="600" y="150" width="180" height="45" rx="4" fill="#3d8bfd22" stroke="#3d8bfd"/>
+  <text x="690" y="177" fill="#3d8bfd" font-size="10" text-anchor="middle" font-weight="500">open-iscsi initiator</text>
+
+  <rect x="600" y="220" width="180" height="45" rx="4" fill="#2dd4a022" stroke="#2dd4a0"/>
+  <text x="690" y="240" fill="#2dd4a0" font-size="10" text-anchor="middle" font-weight="500">Remote LUNs from A</text>
+  <text x="690" y="255" fill="#6b7a8d" font-size="9" text-anchor="middle">sdm..sdx (12 iSCSI devs)</text>
+
+  <line x1="690" y1="195" x2="690" y2="218" stroke="#2dd4a0" stroke-width="1.5" marker-end="url(#aGrn)"/>
+
+  <rect x="600" y="280" width="400" height="30" rx="4" fill="#1a2230" stroke="#2a3545" stroke-dasharray="3,2"/>
+  <text x="800" y="300" fill="#6b7a8d" font-size="10" text-anchor="middle">Pool not imported — devices available for failover</text>
+
+  <!-- Cross links -->
+  <path d="M440,92 C500,92 510,172 580,172" fill="none" stroke="#3d8bfd" stroke-width="2" stroke-dasharray="8,4" marker-end="url(#aBlu)"/>
+  <path d="M580,92 C520,92 510,172 440,172" fill="none" stroke="#3d8bfd" stroke-width="2" stroke-dasharray="8,4" marker-end="url(#aBlu)"/>
+  <text x="510" y="118" fill="#3d8bfd" font-size="10" text-anchor="middle" font-weight="600">40GbE</text>
+  <text x="510" y="132" fill="#3d8bfd" font-size="9" text-anchor="middle">iSCSI LUNs</text>
+  <text x="510" y="146" fill="#6b7a8d" font-size="8" text-anchor="middle">VLAN 10</text>
+
+  <defs>
+    <marker id="aBlu" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><path d="M0,0 L7,2.5 L0,5" fill="#3d8bfd"/></marker>
+    <marker id="aOrg" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><path d="M0,0 L7,2.5 L0,5" fill="#f59e42"/></marker>
+    <marker id="aGrn" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><path d="M0,0 L7,2.5 L0,5" fill="#2dd4a0"/></marker>
+  </defs>
+</svg>

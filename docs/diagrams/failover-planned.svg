@@ -1,0 +1,52 @@
+<svg viewBox="0 0 1050 400" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1050px;display:block;margin:0 auto;">
+  <text x="525" y="22" fill="#2dd4a0" font-size="14" text-anchor="middle" font-weight="700">Planned Failover: Graceful Migration A → B</text>
+
+  <line x1="80" y1="55" x2="80" y2="380" stroke="#2a3545" stroke-width="2"/>
+
+  <text x="300" y="48" fill="#f59e42" font-size="11" text-anchor="middle" font-weight="600">NODE A (active → standby)</text>
+  <text x="680" y="48" fill="#2dd4a0" font-size="11" text-anchor="middle" font-weight="600">NODE B (standby → active)</text>
+
+  <!-- T=0 -->
+  <circle cx="80" cy="80" r="6" fill="#a78bfa"/>
+  <text x="55" y="84" fill="#a78bfa" font-size="9" text-anchor="end" font-weight="600">T=0</text>
+  <rect x="150" y="65" width="300" height="30" rx="4" fill="#a78bfa22" stroke="#a78bfa"/>
+  <text x="300" y="85" fill="#a78bfa" font-size="10" text-anchor="middle">Admin runs: pcs node standby storage-a</text>
+
+  <!-- T≈1s -->
+  <circle cx="80" cy="125" r="6" fill="#f59e42"/>
+  <text x="55" y="129" fill="#f59e42" font-size="9" text-anchor="end" font-weight="600">T≈1s</text>
+  <rect x="150" y="110" width="300" height="30" rx="4" fill="#f59e4222" stroke="#f59e42"/>
+  <text x="300" y="130" fill="#f59e42" font-size="10" text-anchor="middle">Services stop gracefully (iSCSI-sync, SMB, NFS)</text>
+
+  <!-- T≈2s -->
+  <circle cx="80" cy="170" r="6" fill="#22d3ee"/>
+  <text x="55" y="174" fill="#22d3ee" font-size="9" text-anchor="end" font-weight="600">T≈2s</text>
+  <rect x="150" y="155" width="300" height="30" rx="4" fill="#22d3ee22" stroke="#22d3ee"/>
+  <text x="300" y="175" fill="#22d3ee" font-size="10" text-anchor="middle">VIPs released — client outage begins</text>
+
+  <!-- T≈3s -->
+  <circle cx="80" cy="215" r="6" fill="#2dd4a0"/>
+  <text x="55" y="219" fill="#2dd4a0" font-size="9" text-anchor="end" font-weight="600">T≈3s</text>
+  <rect x="150" y="200" width="300" height="30" rx="4" fill="#2dd4a022" stroke="#2dd4a0"/>
+  <text x="300" y="220" fill="#2dd4a0" font-size="10" text-anchor="middle">zpool export: flush ARC, commit final TXG</text>
+
+  <!-- T≈4s -->
+  <circle cx="80" cy="260" r="6" fill="#2dd4a0"/>
+  <text x="55" y="264" fill="#2dd4a0" font-size="9" text-anchor="end" font-weight="600">T≈4s</text>
+  <rect x="530" y="245" width="300" height="30" rx="4" fill="#2dd4a022" stroke="#2dd4a0"/>
+  <text x="680" y="265" fill="#2dd4a0" font-size="10" text-anchor="middle">zpool import: clean flag, no ZIL replay</text>
+
+  <!-- T≈5s -->
+  <circle cx="80" cy="305" r="6" fill="#22d3ee"/>
+  <text x="55" y="309" fill="#22d3ee" font-size="9" text-anchor="end" font-weight="600">T≈5s</text>
+  <rect x="530" y="290" width="300" height="30" rx="4" fill="#22d3ee22" stroke="#22d3ee"/>
+  <text x="680" y="310" fill="#22d3ee" font-size="10" text-anchor="middle">VIPs up + gratuitous ARP → services start</text>
+
+  <!-- T≈6-8s -->
+  <circle cx="80" cy="350" r="6" fill="#2dd4a0"/>
+  <text x="55" y="354" fill="#2dd4a0" font-size="9" text-anchor="end" font-weight="600">T≈6s</text>
+  <rect x="530" y="335" width="300" height="30" rx="4" fill="#2dd4a022" stroke="#2dd4a0" stroke-width="2"/>
+  <text x="680" y="355" fill="#2dd4a0" font-size="10" text-anchor="middle" font-weight="600">Clients resume — pool ONLINE, fully healthy</text>
+
+  <text x="680" y="385" fill="#6b7a8d" font-size="10" text-anchor="middle">All 12 mirrors intact · No resilver needed · Node A still exports disks via iSCSI</text>
+</svg>

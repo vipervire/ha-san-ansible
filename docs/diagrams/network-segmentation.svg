@@ -1,0 +1,62 @@
+<svg viewBox="0 0 1050 490" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:1050px;display:block;margin:0 auto;">
+  <!-- Storage network -->
+  <rect x="30" y="20" width="990" height="90" rx="6" fill="#3d8bfd11" stroke="#3d8bfd" stroke-width="1"/>
+  <text x="50" y="42" fill="#3d8bfd" font-size="12" font-weight="600">Storage Interconnect — VLAN 10 · 40GbE · MTU 9000</text>
+  <text x="50" y="60" fill="#6b7a8d" font-size="10">Dedicated to iSCSI replication traffic between storage nodes. No client traffic.</text>
+
+  <rect x="80" y="72" width="160" height="26" rx="3" fill="#1a2230" stroke="#3d8bfd" stroke-width="1"/>
+  <text x="160" y="90" fill="#3d8bfd" font-size="10" text-anchor="middle">storage-a: 10.10.10.1/24</text>
+  <rect x="320" y="72" width="160" height="26" rx="3" fill="#1a2230" stroke="#3d8bfd" stroke-width="1"/>
+  <text x="400" y="90" fill="#3d8bfd" font-size="10" text-anchor="middle">storage-b: 10.10.10.2/24</text>
+
+  <line x1="240" y1="85" x2="320" y2="85" stroke="#3d8bfd" stroke-width="2"/>
+
+  <!-- Management network -->
+  <rect x="30" y="130" width="990" height="90" rx="6" fill="#a78bfa11" stroke="#a78bfa" stroke-width="1"/>
+  <text x="50" y="152" fill="#a78bfa" font-size="12" font-weight="600">Management / Cluster — VLAN 20 · 1/10GbE</text>
+  <text x="50" y="170" fill="#6b7a8d" font-size="10">Corosync heartbeat, Pacemaker control, SSH admin, IPMI/BMC access.</text>
+
+  <rect x="80" y="182" width="160" height="26" rx="3" fill="#1a2230" stroke="#a78bfa" stroke-width="1"/>
+  <text x="160" y="200" fill="#a78bfa" font-size="10" text-anchor="middle">storage-a: 10.20.20.1/24</text>
+  <rect x="320" y="182" width="160" height="26" rx="3" fill="#1a2230" stroke="#a78bfa" stroke-width="1"/>
+  <text x="400" y="200" fill="#a78bfa" font-size="10" text-anchor="middle">storage-b: 10.20.20.2/24</text>
+  <rect x="560" y="182" width="160" height="26" rx="3" fill="#1a2230" stroke="#a78bfa" stroke-width="1"/>
+  <text x="640" y="200" fill="#a78bfa" font-size="10" text-anchor="middle">quorum: 10.20.20.3/24</text>
+
+  <line x1="240" y1="195" x2="320" y2="195" stroke="#a78bfa" stroke-width="1.5"/>
+  <line x1="480" y1="195" x2="560" y2="195" stroke="#a78bfa" stroke-width="1.5"/>
+
+  <!-- Enduser VLAN 30 -->
+  <rect x="30" y="240" width="990" height="110" rx="6" fill="#22d3ee11" stroke="#22d3ee" stroke-width="1"/>
+  <text x="50" y="262" fill="#22d3ee" font-size="12" font-weight="600">Enduser / Service — VLAN 30 · 10/40GbE</text>
+  <text x="50" y="280" fill="#6b7a8d" font-size="10">NFS and SMB client traffic. Floating vip-enduser lives here.</text>
+
+  <rect x="80" y="292" width="160" height="26" rx="3" fill="#1a2230" stroke="#22d3ee" stroke-width="1"/>
+  <text x="160" y="310" fill="#22d3ee" font-size="10" text-anchor="middle">storage-a: 10.30.30.1/24</text>
+  <rect x="320" y="292" width="160" height="26" rx="3" fill="#1a2230" stroke="#22d3ee" stroke-width="1"/>
+  <text x="400" y="310" fill="#22d3ee" font-size="10" text-anchor="middle">storage-b: 10.30.30.2/24</text>
+
+  <!-- VIPs for enduser -->
+  <rect x="580" y="286" width="200" height="26" rx="3" fill="#22d3ee22" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="680" y="304" fill="#22d3ee" font-size="10" text-anchor="middle" font-weight="600">vip-enduser: 10.30.30.10</text>
+
+  <text x="785" y="330" fill="#6b7a8d" font-size="9" text-anchor="middle">Services: NFS 2049, SMB 445</text>
+
+  <!-- Hypervisor VLAN 40 -->
+  <rect x="30" y="370" width="990" height="110" rx="6" fill="#f59e4211" stroke="#f59e42" stroke-width="1"/>
+  <text x="50" y="392" fill="#f59e42" font-size="12" font-weight="600">Hypervisor / iSCSI — VLAN 40 · 10/40GbE</text>
+  <text x="50" y="410" fill="#6b7a8d" font-size="10">iSCSI and SSH access for hypervisor nodes. Floating vip-hypervisor lives here.</text>
+
+  <rect x="80" y="422" width="160" height="26" rx="3" fill="#1a2230" stroke="#f59e42" stroke-width="1"/>
+  <text x="160" y="440" fill="#f59e42" font-size="10" text-anchor="middle">storage-a: 10.40.40.1/24</text>
+  <rect x="320" y="422" width="160" height="26" rx="3" fill="#1a2230" stroke="#f59e42" stroke-width="1"/>
+  <text x="400" y="440" fill="#f59e42" font-size="10" text-anchor="middle">storage-b: 10.40.40.2/24</text>
+
+  <!-- VIPs for hypervisor -->
+  <rect x="580" y="416" width="200" height="26" rx="3" fill="#f59e4222" stroke="#f59e42" stroke-width="1.5"/>
+  <text x="680" y="434" fill="#f59e42" font-size="10" text-anchor="middle" font-weight="600">vip-hypervisor: 10.40.40.10</text>
+
+  <text x="785" y="460" fill="#6b7a8d" font-size="9" text-anchor="middle">Services: iSCSI 3260, SSH 22</text>
+
+  <text x="525" y="485" fill="#6b7a8d" font-size="10" text-anchor="middle">Defined in client_vlans list in group_vars/all.yml — Managed by Pacemaker, VIPs follow the active node</text>
+</svg>
