@@ -1,3 +1,10 @@
+- title: Getting Started
+  links:
+    - title: Getting Started Guide
+      url: getting-started.html
+    - title: Variables Reference
+      url: variables.html
+
 - title: Operations
   links:
     - title: Operations Runbook
