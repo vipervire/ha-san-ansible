@@ -167,3 +167,77 @@
     enabled: false
     daemon_reload: true
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
+
+- name: Deploy iSCSI client config save script
+  ansible.builtin.template:
+    src: iscsi-save-client-config.py.j2
+    dest: /root/iscsi-save-client-config.py
+    mode: "0700"
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
+
+- name: Deploy iSCSI client config strip script
+  ansible.builtin.template:
+    src: iscsi-strip-client-config.py.j2
+    dest: /root/iscsi-strip-client-config.py
+    mode: "0700"
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
+
+- name: Deploy iSCSI config sync path unit
+  ansible.builtin.template:
+    src: iscsi-config-sync.path.j2
+    dest: /etc/systemd/system/iscsi-config-sync.path
+    mode: "0644"
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
+  notify: reload systemd
+
+- name: Deploy iSCSI config sync service unit
+  ansible.builtin.template:
+    src: iscsi-config-sync.service.j2
+    dest: /etc/systemd/system/iscsi-config-sync.service
+    mode: "0644"
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
+  notify: reload systemd
+
+# Capture the current client config to shared ZFS storage before stripping.
+# Must run BEFORE stripping and BEFORE the path watcher (re-)enables.
+# Delegates to pacemaker_preferred_node because the ZFS pool is expected to be
+# mounted there. If the pool has failed over to the other node at re-deploy time,
+# this task will fail visibly — do not suppress with ignore_errors, so the
+# operator knows to re-run after confirming which node is currently active.
+- name: Save current client config to shared ZFS storage (before strip)
+  ansible.builtin.command:
+    cmd: /root/iscsi-save-client-config.py
+  when: >
+    (client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0) and
+    (ansible_mounts | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0)
+  changed_when: true
+  run_once: true
+  delegate_to: "{{ pacemaker_preferred_node }}"
+
+# Stop the path watcher before stripping so it cannot fire while saveconfig.json
+# is in the transient backend-only state and overwrite the shared client config.
+# ignore_errors: first deploy has the unit deployed but not yet known to systemd.
+- name: Stop iSCSI config sync path watcher before strip
+  ansible.builtin.systemd:
+    name: iscsi-config-sync.path
+    state: stopped
+  ignore_errors: true
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
+
+# Strip client entries from local saveconfig.json so they don't load at boot.
+# The sync script will restore the exact config from shared ZFS after pool import.
+- name: Strip client-facing entries from local saveconfig.json
+  ansible.builtin.command:
+    cmd: /root/iscsi-strip-client-config.py
+  changed_when: true
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
+
+# Re-enable path watcher AFTER stripping — safe now that saveconfig.json is
+# backend-only and the shared client config was saved above.
+- name: Enable iSCSI config sync path watcher
+  ansible.builtin.systemd:
+    name: iscsi-config-sync.path
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0

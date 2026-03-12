@@ -1,0 +1,15 @@
+# Managed by Ansible — Extract client-facing LIO config to shared ZFS storage
+#
+# Activated by iscsi-config-sync.path when saveconfig.json is modified.
+# ConditionPathIsMountPoint prevents this from firing on the standby node
+# (where the ZFS pool is not mounted).
+[Unit]
+Description=Extract client-facing LIO config to shared ZFS storage
+ConditionPathIsMountPoint=/{{ zfs_pool_name }}
+After={{ _iscsi_target_service }}.service
+
+[Service]
+Type=oneshot
+ExecStart=/root/iscsi-save-client-config.py
+StandardOutput=journal
+StandardError=journal

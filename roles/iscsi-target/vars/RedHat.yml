@@ -6,3 +6,4 @@ _iscsi_target_packages:
   - python3-rtslib
 
 _iscsi_target_service: target
+_iscsi_saveconfig_path: /etc/target/saveconfig.json

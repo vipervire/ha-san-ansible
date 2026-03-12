@@ -18,3 +18,6 @@ _samba_services:
 _iscsi_client_target_packages:
   - targetcli-fb
   - python3-rtslib-fb
+
+_iscsi_target_service: rtslib-fb-targetctl
+_iscsi_saveconfig_path: /etc/rtslib-fb-target/saveconfig.json

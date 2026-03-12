@@ -15,7 +15,10 @@ Ansible playbook for HA ZFS-over-iSCSI SAN (Debian 12, Ubuntu 22.04/24.04, Rocky
 | Per-node IPs, IQNs, disk paths | `host_vars/storage-[ab].yml` |
 | Firewall template | `roles/hardening/templates/nftables.conf.j2` |
 | STONITH script template | `roles/pacemaker/templates/configure-stonith.sh.j2` |
-| iSCSI LUN sync script | `roles/services/templates/sync-iscsi-luns.sh.j2` |
+| iSCSI LUN sync script (Pacemaker resource) | `roles/services/templates/sync-iscsi-luns.sh.j2` |
+| iSCSI client config save script (ExecStop, path watcher) | `roles/services/templates/iscsi-save-client-config.py.j2` |
+| iSCSI client config strip script (run each deploy) | `roles/services/templates/iscsi-strip-client-config.py.j2` |
+| iSCSI config sync path/service units | `roles/services/templates/iscsi-config-sync.{path,service}.j2` |
 | Pacemaker resource config | `roles/pacemaker/templates/configure-resources.sh.j2` |
 
 ## Inventory Groups
@@ -117,7 +120,15 @@ CHAP credentials are never stored in plaintext on disk. Ansible deploys `/root/.
 
 ### iSCSI LUN Auto-Sync
 
-`sync-iscsi-luns` Pacemaker resource auto-maps zvols to LIO LUNs after each pool import. Phase 0 bakes in TPG→dataset mapping at deploy time (no runtime file dependency). To add an initiator ACL without re-running Ansible: edit `/san-pool/cluster-config/iscsi/acls-<vlan-name>.conf`, then run `bash /root/sync-iscsi-luns.sh`.
+`sync-iscsi-luns` Pacemaker resource restores the exact client-facing LIO config (LUN numbers, ACLs, CHAP) from shared ZFS storage after each pool import. LUN numbers are preserved across failovers — no reordering. Phase 0 bakes in TPG→dataset mapping at deploy time (no runtime file dependency).
+
+The client config is split from the node-local `saveconfig.json`:
+- **Node-local `saveconfig.json`**: backend target only (disk backstores for ZFS replication peer)
+- **`/san-pool/cluster-config/iscsi/client-saveconfig.json`**: client-facing target (zvol LUNs, ACLs, CHAP) — authoritative source of truth
+
+A systemd path unit (`iscsi-config-sync.path`) watches `saveconfig.json` for changes and syncs the client portion to shared storage in near-real-time. `ExecStop` on the sync service saves a final copy during planned failover.
+
+To add an initiator ACL without re-running Ansible: `targetcli /iscsi/<iqn>/tpg<N>/acls create <initiator_iqn> && targetcli saveconfig` — the path watcher will persist the change to shared storage automatically.
 
 ### Pacemaker Resource Ordering
 

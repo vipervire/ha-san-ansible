@@ -1,0 +1,14 @@
+# Managed by Ansible — Watch LIO saveconfig.json for client-facing config changes
+#
+# Triggers iscsi-config-sync.service whenever targetcli writes saveconfig.json
+# (e.g. Proxmox ZFS-over-iSCSI plugin, democratic-csi SSH transport, manual
+# targetcli saveconfig). Extracts the client-facing portion to shared ZFS
+# storage in near-real-time so the standby node always has a current copy.
+[Unit]
+Description=Watch LIO saveconfig.json for client-facing config changes
+
+[Path]
+PathModified={{ _iscsi_saveconfig_path }}
+
+[Install]
+WantedBy=multi-user.target
