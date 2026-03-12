@@ -65,7 +65,7 @@ MERGED_CONFIG=$(mktemp /tmp/lio-merged-XXXXXX.json)
 trap 'rm -f "${MERGED_CONFIG}"' EXIT
 
 python3 - << PYEOF
-import json, sys
+import json
 
 LOCAL_CONFIG  = "{{ _iscsi_saveconfig_path }}"
 CLIENT_CONFIG = "${SHARED_CLIENT_CONFIG}"
