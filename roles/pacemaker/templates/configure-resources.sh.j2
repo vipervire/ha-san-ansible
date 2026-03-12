@@ -110,7 +110,6 @@ pcs resource create sync-iscsi-luns systemd:sync-iscsi-luns \
 # Stop order (reversed): portunblock stops first (re-blocks via
 # reset_local_on_unblock_stop=true), then services drain, then VIPs are removed,
 # then portblock rules are cleaned up.
-mkdir -p /run/portblock
 echo "Creating portblock/portunblock resources"
 {% for cv in client_vlans %}
 {% for svc in cv.services | select('in', _portblock_port_map) %}
