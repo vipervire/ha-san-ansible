@@ -12,7 +12,7 @@ Requires={{ _iscsi_target_service }}.service
 [Service]
 Type=oneshot
 ExecStart=/root/sync-iscsi-luns.sh
-ExecStop=/root/iscsi-save-client-config.sh
+ExecStop=/root/iscsi-save-client-config.py
 RemainAfterExit=yes
 StandardOutput=journal
 StandardError=journal

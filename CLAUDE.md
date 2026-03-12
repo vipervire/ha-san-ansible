@@ -15,7 +15,10 @@ Ansible playbook for HA ZFS-over-iSCSI SAN (Debian 12, Ubuntu 22.04/24.04, Rocky
 | Per-node IPs, IQNs, disk paths | `host_vars/storage-[ab].yml` |
 | Firewall template | `roles/hardening/templates/nftables.conf.j2` |
 | STONITH script template | `roles/pacemaker/templates/configure-stonith.sh.j2` |
-| iSCSI LUN sync script | `roles/services/templates/sync-iscsi-luns.sh.j2` |
+| iSCSI LUN sync script (Pacemaker resource) | `roles/services/templates/sync-iscsi-luns.sh.j2` |
+| iSCSI client config save script (ExecStop, path watcher) | `roles/services/templates/iscsi-save-client-config.py.j2` |
+| iSCSI client config strip script (run each deploy) | `roles/services/templates/iscsi-strip-client-config.py.j2` |
+| iSCSI config sync path/service units | `roles/services/templates/iscsi-config-sync.{path,service}.j2` |
 | Pacemaker resource config | `roles/pacemaker/templates/configure-resources.sh.j2` |
 
 ## Inventory Groups

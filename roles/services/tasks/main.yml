@@ -170,15 +170,15 @@
 
 - name: Deploy iSCSI client config save script
   ansible.builtin.template:
-    src: iscsi-save-client-config.sh.j2
-    dest: /root/iscsi-save-client-config.sh
+    src: iscsi-save-client-config.py.j2
+    dest: /root/iscsi-save-client-config.py
     mode: "0700"
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
 - name: Deploy iSCSI client config strip script
   ansible.builtin.template:
-    src: iscsi-strip-client-config.sh.j2
-    dest: /root/iscsi-strip-client-config.sh
+    src: iscsi-strip-client-config.py.j2
+    dest: /root/iscsi-strip-client-config.py
     mode: "0700"
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
@@ -200,15 +200,17 @@
 
 # Capture the current client config to shared ZFS storage before stripping.
 # Must run BEFORE stripping and BEFORE the path watcher (re-)enables.
-# On re-deploy the pool must be mounted; ignore_errors handles standby node.
+# Delegates to pacemaker_preferred_node because the ZFS pool is expected to be
+# mounted there. If the pool has failed over to the other node at re-deploy time,
+# this task will fail visibly — do not suppress with ignore_errors, so the
+# operator knows to re-run after confirming which node is currently active.
 - name: Save current client config to shared ZFS storage (before strip)
   ansible.builtin.command:
-    cmd: /root/iscsi-save-client-config.sh
+    cmd: /root/iscsi-save-client-config.py
   when: >
     (client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0) and
     (ansible_mounts | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0)
   changed_when: true
-  ignore_errors: true
   run_once: true
   delegate_to: "{{ pacemaker_preferred_node }}"
 
@@ -226,7 +228,7 @@
 # The sync script will restore the exact config from shared ZFS after pool import.
 - name: Strip client-facing entries from local saveconfig.json
   ansible.builtin.command:
-    cmd: /root/iscsi-strip-client-config.sh
+    cmd: /root/iscsi-strip-client-config.py
   changed_when: true
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 

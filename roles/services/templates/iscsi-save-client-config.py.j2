@@ -11,7 +11,7 @@
 #   Backend targets:     targets where wwn != {{ iscsi_client_iqn }}
 #   Client target:       targets where wwn == {{ iscsi_client_iqn }}
 #
-# Usage: python3 /root/iscsi-save-client-config.sh
+# Usage: /root/iscsi-save-client-config.py
 #        (also called as ExecStop by sync-iscsi-luns.service during planned failover)
 
 import json

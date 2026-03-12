@@ -223,9 +223,14 @@ for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
     if [ "${TPG_GEN_ACLS[$tpg_tag]}" = "true" ] && [[ "${TPG_CHAP_USER[$tpg_tag]+_}" ]]; then
         echo "  + Setting TPG-level CHAP and authentication=1 for tpg${tpg_tag}"
         targetcli <<< "/iscsi/${TARGET_IQN}/tpg${tpg_tag} set attribute authentication=1"
-        _chap_cmd="/iscsi/${TARGET_IQN}/tpg${tpg_tag} set auth userid=${TPG_CHAP_USER[$tpg_tag]} password=${TPG_CHAP_PASS[$tpg_tag]}"
+        # Wrap userid/password in single quotes for targetcli's shlex parser so that
+        # values containing spaces, $, or other metacharacters are passed intact.
+        # Embedded single quotes are escaped as '\''.
+        _cu="${TPG_CHAP_USER[$tpg_tag]}"
+        _cp="${TPG_CHAP_PASS[$tpg_tag]}"
+        _chap_cmd="/iscsi/${TARGET_IQN}/tpg${tpg_tag} set auth userid='${_cu//\'/\'\\\'\'}' password='${_cp//\'/\'\\\'\'}'"
         targetcli <<< "$_chap_cmd"
-        unset _chap_cmd
+        unset _chap_cmd _cu _cp
         chap_applied=true
     fi
 done
@@ -236,7 +241,7 @@ fi
 # ─── Phase 3: Save updated config to shared storage ───────────────────────────
 echo ""
 echo "--- Phase 3: Save to shared storage ---"
-/root/iscsi-save-client-config.sh
+/root/iscsi-save-client-config.py
 
 echo ""
 echo "=== iSCSI LUN sync complete ==="
