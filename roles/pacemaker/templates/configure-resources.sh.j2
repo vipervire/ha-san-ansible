@@ -94,7 +94,7 @@ pcs resource create cockpit-service systemd:cockpit.socket \
 # plugin, manual 'zfs create -V', or Ansible.
 echo "Creating iSCSI LUN sync resource"
 pcs resource create sync-iscsi-luns systemd:sync-iscsi-luns \
-  op start timeout=30s op stop timeout=10s \
+  op start timeout=60s op stop timeout=30s \
   op monitor interval=0 \
   2>/dev/null || echo "  (sync-iscsi-luns already exists)"
 {% endif %}

@@ -6,3 +6,4 @@ _iscsi_target_packages:
   - python3-rtslib-fb
 
 _iscsi_target_service: rtslib-fb-targetctl
+_iscsi_saveconfig_path: /etc/rtslib-fb-target/saveconfig.json

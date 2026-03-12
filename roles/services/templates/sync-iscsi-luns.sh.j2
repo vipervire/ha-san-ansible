@@ -1,20 +1,17 @@
 #!/bin/bash
-# Managed by Ansible — Auto-discover zvols and map as client-facing iSCSI LUNs
+# Managed by Ansible — Restore client-facing iSCSI LUNs from shared ZFS storage
 #
-# This script is called by Pacemaker (via systemd) after the ZFS pool imports.
-# It ensures every zvol under each iSCSI VLAN's dataset has a corresponding LIO
-# backstore and LUN mapping in that VLAN's TPG — regardless of how the zvol was
-# created: ZFS-over-iSCSI Proxmox plugin, Houston Cockpit UI, manual
-# 'zfs create -V', or Ansible.
+# Called by Pacemaker (via systemd) after the ZFS pool imports on either node.
+# Restores the exact LIO client config (LUN numbers, ACLs, CHAP) from shared
+# storage instead of reconstructing from zvol enumeration, which would cause
+# LUN reordering (breaks Kubernetes CSI PV mappings).
 #
-# Per-VLAN TPG design:
-#   - Each iSCSI-enabled client VLAN has its own TPG with isolated LUN namespace
-#   - Backstore naming: single-VLAN = <zvol_name>; multi-VLAN = <vlan>-<zvol_name>
-#   - ACLs are read from acls-<vlan-name>.conf on shared storage (per-TPG)
-#   - TPG-to-VLAN mapping is baked in at Ansible deploy time (no runtime file dep)
-#
-# Safe to re-run: idempotent. Adds missing LUNs, removes stale backstores,
-# never touches zvols.
+# Phases:
+#   0    — TPG-to-VLAN mapping (baked in at Ansible deploy time)
+#   0.5  — Decrypt CHAP credentials
+#   1    — Restore from shared client-saveconfig.json (merge with local backend)
+#   2    — Gap-fill: map any zvols not yet in restored config (crash window safety)
+#   3    — Save updated config to shared storage
 #
 # Usage: bash /root/sync-iscsi-luns.sh
 set -euo pipefail
@@ -22,13 +19,10 @@ set -euo pipefail
 {% set iscsi_vlan_count = iscsi_vlans | length %}
 
 TARGET_IQN="{{ iscsi_client_iqn }}"
+SHARED_CLIENT_CONFIG="/{{ zfs_pool_name }}/cluster-config/iscsi/client-saveconfig.json"
 TOTAL_TPGS={{ iscsi_vlan_count }}
 
 # ─── Phase 0: TPG-to-VLAN mapping (baked in at Ansible deploy time) ───────────
-# Avoids runtime file dependency for TPG→dataset/VLAN mapping.
-# Single-VLAN deployments use no backstore prefix (backward-compatible with
-# zvols created before per-VLAN TPGs). Multi-VLAN uses <vlan>- prefix to
-# prevent VMID collisions (e.g. two Proxmox clusters both creating vm-100-disk-0).
 declare -A TPG_DATASET TPG_VLAN TPG_BS_PREFIX TPG_GEN_ACLS
 {% for cv in iscsi_vlans %}
 TPG_DATASET[{{ loop.index }}]="{{ cv.iscsi_dataset | default(iscsi_client_zvol_dataset) }}"
@@ -37,7 +31,7 @@ TPG_BS_PREFIX[{{ loop.index }}]="{{ (cv.name + '-') if iscsi_vlan_count > 1 else
 TPG_GEN_ACLS[{{ loop.index }}]="{{ 'true' if (cv.generate_node_acls | default(false)) else 'false' }}"
 {% endfor %}
 
-# ─── Decrypt CHAP credentials ─────────────────────────────────────────────
+# ─── Phase 0.5: Decrypt CHAP credentials ──────────────────────────────────────
 # CHAP_USER["tpg:iqn"] / CHAP_PASS["tpg:iqn"] — per-initiator (ACL-mode VLANs)
 # TPG_CHAP_USER["tpg"] / TPG_CHAP_PASS["tpg"] — per-TPG (generate_node_acls VLANs)
 declare -A CHAP_USER CHAP_PASS TPG_CHAP_USER TPG_CHAP_PASS
@@ -53,261 +47,196 @@ echo "=== Syncing iSCSI LUNs for target: ${TARGET_IQN} ==="
 echo "    TPG{{ loop.index }}: VLAN={{ cv.name }}, dataset={{ cv.iscsi_dataset | default(iscsi_client_zvol_dataset) }}"
 {% endfor %}
 
-# ─── Phase 1: Parse saveconfig.json (one python3 invocation) ──────────────────
-# Each targetcli spawn costs 1-3s (Python init + rtslib load). Parsing
-# saveconfig.json directly avoids N spawns for existence checks.
-#
-# Output format (pipe-delimited):
-#   TARGET_EXISTS|<0|1>
-#   BS|<backstore-name>|<dev-path>         (one per block backstore, global)
-#   LUN|<tpg_tag>|<backstore-name>         (one per LUN mapping, per-TPG)
-#   ACL|<tpg_tag>|<initiator-iqn>          (one per ACL, per-TPG)
+# ─── Phase 1: Restore from shared storage ─────────────────────────────────────
+echo ""
+echo "--- Phase 1: Restore from shared client config ---"
 
-declare -A EXISTING_BS     # backstore name → device path (global)
-declare -A EXISTING_LUNS   # "tpg_tag:bs_name" → 1 (per-TPG LUN mappings)
-declare -A EXISTING_ACLS   # "tpg_tag:iqn" → 1 (per-TPG ACLs)
-TARGET_EXISTS=0
-
-while IFS='|' read -r _type _key _val; do
-    case "$_type" in
-        TARGET_EXISTS) TARGET_EXISTS="$_key" ;;
-        BS)            EXISTING_BS["$_key"]="$_val" ;;
-        LUN)           EXISTING_LUNS["${_key}:${_val}"]=1 ;;
-        ACL)           EXISTING_ACLS["${_key}:${_val}"]=1 ;;
-    esac
-done < <(ISCSI_TARGET="${TARGET_IQN}" python3 - << 'PYEOF'
-import json, sys, os
-
-saveconfig = '/etc/rtslib-fb-target/saveconfig.json'
-target_iqn = os.environ.get('ISCSI_TARGET', '')
-
-if not os.path.exists(saveconfig):
-    print('TARGET_EXISTS|0')
-    sys.exit(0)
-
-with open(saveconfig) as f:
-    config = json.load(f)
-
-# Global backstores (shared across all TPGs in LIO)
-for bs in config.get('storage_objects', []):
-    if bs.get('plugin') == 'block':
-        name = bs.get('name', '')
-        dev = bs.get('dev', '')
-        if name:
-            print(f'BS|{name}|{dev}')
-
-# Find our target and extract per-TPG LUNs and ACLs
-target_found = False
-for t in config.get('targets', []):
-    if t.get('wwn') == target_iqn and t.get('fabric') == 'iscsi':
-        target_found = True
-        for tpg in t.get('tpgs', []):
-            tpg_tag = tpg.get('tag', 0)
-            # Per-TPG LUN → backstore mappings
-            for lun in tpg.get('luns', []):
-                storage_object = lun.get('storage_object', '')
-                # storage_object format: /backstores/block/<name>
-                bs_name = storage_object.split('/')[-1] if storage_object else ''
-                if bs_name:
-                    print(f'LUN|{tpg_tag}|{bs_name}')
-            # Per-TPG ACLs
-            for acl in tpg.get('node_acls', []):
-                iqn = acl.get('node_wwn', '')
-                if iqn:
-                    print(f'ACL|{tpg_tag}|{iqn}')
-        break
-
-print('TARGET_EXISTS|1' if target_found else 'TARGET_EXISTS|0')
-PYEOF
-)
-
-# Verify target exists (must have been created by setup-client-iscsi-target.sh)
-if [ "$TARGET_EXISTS" != "1" ]; then
-    echo "ERROR: iSCSI target ${TARGET_IQN} does not exist."
-    echo "       Run /root/setup-client-iscsi-target.sh first."
+if [ ! -f "${SHARED_CLIENT_CONFIG}" ]; then
+    echo "ERROR: ${SHARED_CLIENT_CONFIG} not found."
+    echo "       Run /root/setup-client-iscsi-target.sh first, or redeploy with --tags services."
     exit 1
 fi
 
-# ─── Collect all changes; apply in a single targetcli batch ───────────────────
-# Reduces N separate process spawns (one per zvol/ACL) to exactly 1.
-COMMANDS=()
-# CHAP_TARGETS holds "tpg:iqn" keys (no credential values) for ACLs that need
-# per-initiator CHAP applied. Applied in a second pass after Phase 4 so the
-# ACL path exists before the set auth command runs.
-CHAP_TARGETS=()
+# Merge: local backend config (disk backstores + non-client targets) with
+# client config (zvol backstores + client target). Written to a temp file for
+# targetcli restoreconfig. This is safe: during failover the peer is either
+# fenced or has stopped the pool — no active backend sessions exist.
+MERGED_CONFIG=$(mktemp /tmp/lio-merged-XXXXXX.json)
+trap 'rm -f "${MERGED_CONFIG}"' EXIT
 
-# ─── Phase 2: Per-TPG zvol scanning ───────────────────────────────────────────
+python3 - << PYEOF
+import json, sys
+
+LOCAL_CONFIG  = "{{ _iscsi_saveconfig_path }}"
+CLIENT_CONFIG = "${SHARED_CLIENT_CONFIG}"
+OUTPUT        = "${MERGED_CONFIG}"
+CLIENT_IQN    = "${TARGET_IQN}"
+
+# Load configs (local may be empty/absent on first deploy)
+local_cfg  = {}
+client_cfg = {}
+
+try:
+    with open(LOCAL_CONFIG) as f:
+        local_cfg = json.load(f)
+except FileNotFoundError:
+    pass
+
+with open(CLIENT_CONFIG) as f:
+    client_cfg = json.load(f)
+
+# Backend entries: from local config, exclude client-side entries
+backend_storage = [
+    obj for obj in local_cfg.get("storage_objects", [])
+    if not obj.get("dev", "").startswith("/dev/zvol/")
+]
+backend_targets = [
+    t for t in local_cfg.get("targets", [])
+    if t.get("wwn") != CLIENT_IQN
+]
+
+# Client entries: from shared config (zvol backstores + client target)
+client_storage = client_cfg.get("storage_objects", [])
+client_targets = client_cfg.get("targets", [])
+
+merged = {
+    "fabric_modules":  client_cfg.get("fabric_modules",
+                        local_cfg.get("fabric_modules", [])),
+    "storage_objects": backend_storage + client_storage,
+    "targets":         backend_targets + client_targets,
+}
+
+with open(OUTPUT, "w") as f:
+    json.dump(merged, f, indent=2)
+
+bs_count  = len(client_storage)
+tpg_count = sum(len(t.get("tpgs", [])) for t in client_targets)
+print(f"  Merged: {len(backend_storage)} backend + {bs_count} client backstores, "
+      f"{len(client_targets)} client target(s), {tpg_count} TPG(s)")
+PYEOF
+
+echo "  Restoring merged config via targetcli..."
+targetcli restoreconfig "${MERGED_CONFIG}"
+echo "  Config restored."
+
+# ─── Phase 2: Gap-fill — map zvols created since the last save ────────────────
+# Covers the sub-second window between a targetcli save and a crash.
+# New LUNs get explicit number = max(existing LUN in TPG) + 1 to prevent reordering.
+echo ""
+echo "--- Phase 2: Gap-fill (zvols not in restored config) ---"
+
+GAP_COMMANDS=()
+HAS_GAP_FILL=false
+
+# Parse restored state: existing backstores and per-TPG max LUN numbers
+declare -A EXISTING_BS   # bs_name → 1
+declare -A TPG_MAX_LUN   # tpg_tag → max LUN index seen
+
+while IFS='|' read -r _type _key _val; do
+    case "$_type" in
+        BS)  EXISTING_BS["$_key"]=1 ;;
+        LUN) # _key=tpg_tag, _val=lun_index
+            cur="${TPG_MAX_LUN[$_key]:-0}"
+            if [ "$_val" -gt "$cur" ] 2>/dev/null; then
+                TPG_MAX_LUN["$_key"]="$_val"
+            fi
+            ;;
+    esac
+done < <(ISCSI_TARGET="${TARGET_IQN}" MERGED_CFG="${MERGED_CONFIG}" python3 - << 'PYEOF'
+import json, sys, os
+
+# Read from the MERGED config that was just restored — NOT from saveconfig.json,
+# which is stripped (backend-only) and would cause all client backstores to appear
+# missing, leading to duplicate LUN mappings.
+merged_cfg = os.environ.get("MERGED_CFG", "")
+target_iqn = os.environ.get("ISCSI_TARGET", "")
+
+if not merged_cfg or not os.path.exists(merged_cfg):
+    sys.exit(0)
+
+with open(merged_cfg) as f:
+    config = json.load(f)
+
+for bs in config.get("storage_objects", []):
+    if bs.get("plugin") == "block" and bs.get("dev", "").startswith("/dev/zvol/"):
+        name = bs.get("name", "")
+        if name:
+            print(f"BS|{name}|")
+
+for t in config.get("targets", []):
+    if t.get("wwn") == target_iqn:
+        for tpg in t.get("tpgs", []):
+            tpg_tag = tpg.get("tag", 0)
+            for lun in tpg.get("luns", []):
+                lun_index = lun.get("index", 0)
+                print(f"LUN|{tpg_tag}|{lun_index}")
+        break
+PYEOF
+)
+
 for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
     vlan_name="${TPG_VLAN[$tpg_tag]}"
     dataset="${TPG_DATASET[$tpg_tag]}"
     bs_prefix="${TPG_BS_PREFIX[$tpg_tag]}"
-    zvol_parent="{{ zfs_pool_name }}/${dataset}"
-    zvol_dev_base="/dev/zvol/${zvol_parent}"
-
-    echo ""
-    echo "--- Phase 2: TPG${tpg_tag} (VLAN=${vlan_name}, dataset=${dataset}) ---"
+    zvol_dev_base="/dev/zvol/{{ zfs_pool_name }}/${dataset}"
 
     if [ ! -d "$zvol_dev_base" ]; then
-        echo "  (no zvol directory at ${zvol_dev_base} — no iSCSI zvols yet)"
         continue
     fi
 
     for zvol_path in "${zvol_dev_base}"/*; do
-        # Skip subdirectories (nested datasets) — only direct child zvols
         [ -b "$zvol_path" ] || continue
 
         zvol_name=$(basename "$zvol_path")
         bs_name="${bs_prefix}${zvol_name}"
-        lun_key="${tpg_tag}:${bs_name}"
 
-        # Add missing backstore (global in LIO — created once, mapped per-TPG)
-        if [[ ! "${EXISTING_BS[$bs_name]+_}" ]]; then
-            echo "  + Adding backstore: ${bs_name} → ${zvol_path}"
-            COMMANDS+=("/backstores/block create ${bs_name} ${zvol_path}")
-            COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/luns create /backstores/block/${bs_name}")
-        # Add missing LUN mapping in this TPG (backstore exists but not mapped here)
-        elif [[ ! "${EXISTING_LUNS[$lun_key]+_}" ]]; then
-            echo "  + Adding LUN mapping to tpg${tpg_tag}: ${bs_name}"
-            COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/luns create /backstores/block/${bs_name}")
+        if [[ "${EXISTING_BS[$bs_name]+_}" ]]; then
+            continue  # already in restored config
         fi
-    done
 
-    # Remove stale backstores owned by this TPG's dataset (zvol was deleted)
-    # Only considers backstores with this VLAN's prefix and dev path under our dataset.
-    for bs_name in "${!EXISTING_BS[@]}"; do
-        # Skip backstores not belonging to this VLAN (wrong prefix)
-        [[ "$bs_name" == "${bs_prefix}"* ]] || continue
-        zvol_name="${bs_name#$bs_prefix}"
-        expected_dev="${zvol_dev_base}/${zvol_name}"
-        bs_dev="${EXISTING_BS[$bs_name]}"
-        if [ ! -b "$expected_dev" ] && [[ "$bs_dev" == /dev/zvol/${zvol_parent}/* ]]; then
-            # Guard against silent batch failure: targetcli batch mode returns exit code 0
-            # even when a delete is rejected internally (e.g. backstore still has active
-            # LUN mappings). Check EXISTING_LUNS before queuing so the operator sees a
-            # clear message instead of a misleading "LIO configuration saved" with the
-            # backstore still present.
-            bs_has_lun=false
-            for lun_key in "${!EXISTING_LUNS[@]}"; do
-                if [[ "$lun_key" == *":${bs_name}" ]]; then
-                    bs_has_lun=true
-                    break
-                fi
-            done
-            if [ "$bs_has_lun" = "true" ]; then
-                echo "  ! Skipping stale backstore ${bs_name}: active LUN mappings exist."
-                echo "    Remove LUN mappings manually, then re-run: bash /root/sync-iscsi-luns.sh"
-            else
-                echo "  - Removing stale backstore: ${bs_name} (zvol deleted, no active LUNs)"
-                COMMANDS+=("/backstores/block delete ${bs_name}")
-            fi
-        fi
+        HAS_GAP_FILL=true
+        # Assign next LUN number explicitly to avoid reordering
+        next_lun=$(( ${TPG_MAX_LUN[$tpg_tag]:-0} + 1 ))
+        TPG_MAX_LUN[$tpg_tag]="$next_lun"
+
+        echo "  + Gap-fill: backstore ${bs_name} → ${zvol_path} (LUN ${next_lun} in tpg${tpg_tag})"
+        GAP_COMMANDS+=("/backstores/block create ${bs_name} ${zvol_path}")
+        GAP_COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/luns create /backstores/block/${bs_name} ${next_lun}")
     done
 done
 
-# ─── Phase 3: Per-TPG ACL sync from shared storage ────────────────────────────
-# Authoritative ACL lists live on the ZFS pool so both nodes share them.
-# Seeded by setup-client-iscsi-target.sh; editable directly without Ansible.
-echo ""
-echo "--- Phase 3: ACL sync ---"
-ACLS_DIR="/{{ zfs_pool_name }}/cluster-config/iscsi"
-
-for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
-    vlan_name="${TPG_VLAN[$tpg_tag]}"
-    if [ "${TPG_GEN_ACLS[$tpg_tag]}" = "true" ]; then
-        echo "  (tpg${tpg_tag}/VLAN=${vlan_name}: generate_node_acls — skipping ACL sync)"
-        # Apply TPG-level CHAP if credentials are available.
-        # Sent directly via herestring (not batched through COMMANDS) so credential
-        # values are never held as plaintext strings in the array.
-        # NOTE: set -x must not be used in wrapper scripts — it would expose credentials.
-        if [[ "${TPG_CHAP_USER[$tpg_tag]+_}" ]]; then
-            echo "  + Setting TPG-level CHAP and authentication=1 for tpg${tpg_tag}"
-            targetcli <<< "/iscsi/${TARGET_IQN}/tpg${tpg_tag} set attribute authentication=1"
-            _chap_cmd="/iscsi/${TARGET_IQN}/tpg${tpg_tag} set auth userid=${TPG_CHAP_USER[$tpg_tag]} password=${TPG_CHAP_PASS[$tpg_tag]}"
-            targetcli <<< "$_chap_cmd"
-            unset _chap_cmd
-        fi
-        continue
-    fi
-    acl_file="${ACLS_DIR}/acls-${vlan_name}.conf"
-
-    if [ ! -f "$acl_file" ]; then
-        echo "  (no ACL file at ${acl_file} — skipping ACL sync for tpg${tpg_tag})"
-        continue
-    fi
-
-    mapfile -t DESIRED_IQNS < <(grep -v '^\s*#' "$acl_file" | grep -v '^\s*$' || true)
-
-    # Build O(1) lookup set for desired IQNs
-    unset DESIRED_SET; declare -A DESIRED_SET
-    for iqn in "${DESIRED_IQNS[@]}"; do
-        [ -n "$iqn" ] || continue
-        if [[ ! "$iqn" =~ ^iqn\.[0-9]{4}-[0-9]{2}\.[a-zA-Z0-9][-a-zA-Z0-9.]*:[a-zA-Z0-9._:-]+$ ]]; then
-            echo "  WARNING: skipping invalid IQN in ${acl_file}: ${iqn}"
-            continue
-        fi
-        DESIRED_SET["$iqn"]=1
-    done
-
-    # Add missing ACLs to this TPG
-    for iqn in "${DESIRED_IQNS[@]}"; do
-        [ -n "$iqn" ] || continue
-        acl_key="${tpg_tag}:${iqn}"
-        if [[ "${DESIRED_SET[$iqn]+_}" ]] && [[ ! "${EXISTING_ACLS[$acl_key]+_}" ]]; then
-            echo "  + Adding ACL to tpg${tpg_tag}: ${iqn}"
-            COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/acls create ${iqn}")
-            # Queue for CHAP application after Phase 4 (ACL must exist first).
-            # Only the tpg:iqn key is stored — no credential values in the array.
-            chap_key="${tpg_tag}:${iqn}"
-            if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
-                CHAP_TARGETS+=("${tpg_tag}:${iqn}")
-            fi
-        fi
-    done
-
-    # Remove stale ACLs from this TPG (present in LIO but not in acl file)
-    for acl_key in "${!EXISTING_ACLS[@]}"; do
-        [[ "$acl_key" == "${tpg_tag}:"* ]] || continue
-        existing_iqn="${acl_key#${tpg_tag}:}"
-        if [[ ! "${DESIRED_SET[$existing_iqn]+_}" ]]; then
-            echo "  - Removing stale ACL from tpg${tpg_tag}: ${existing_iqn}"
-            COMMANDS+=("/iscsi/${TARGET_IQN}/tpg${tpg_tag}/acls delete ${existing_iqn}")
-        fi
-    done
-done
-
-# ─── Phase 4: Apply all changes in a single targetcli batch ───────────────────
-
-if [ ${#COMMANDS[@]} -gt 0 ]; then
-    COMMANDS+=("saveconfig")
-    printf '%s\n' "${COMMANDS[@]}" | targetcli
-    echo "=== LIO configuration saved ==="
+if [ "$HAS_GAP_FILL" = "true" ]; then
+    GAP_COMMANDS+=("saveconfig")
+    printf '%s\n' "${GAP_COMMANDS[@]}" | targetcli
+    echo "  Gap-fill applied and LIO config saved."
 else
-    echo "=== No changes needed — all LUNs and ACLs in sync ==="
+    echo "  No gap-fill needed — restored config is complete."
 fi
 
-# ─── Phase 5: Apply per-initiator CHAP credentials ────────────────────────────
-# Run after Phase 4 so ACL paths created above are guaranteed to exist.
-# Credentials are never stored in the COMMANDS array — each command is issued
-# via herestring and the variable is immediately unset.
-# NOTE: set -x must not be used in wrapper scripts — it would expose credentials.
-if [ ${#CHAP_TARGETS[@]} -gt 0 ]; then
-    echo ""
-    echo "--- Phase 5: Per-initiator CHAP credentials ---"
-    chap_changed=false
-    for chap_target in "${CHAP_TARGETS[@]}"; do
-        _tpg="${chap_target%%:*}"
-        _iqn="${chap_target#*:}"
-        chap_key="${_tpg}:${_iqn}"
-        if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
-            echo "  + Setting CHAP credentials for tpg${_tpg}: ${_iqn}"
-            _chap_cmd="/iscsi/${TARGET_IQN}/tpg${_tpg}/acls/${_iqn} set auth userid=${CHAP_USER[$chap_key]} password=${CHAP_PASS[$chap_key]}"
-            targetcli <<< "$_chap_cmd"
-            unset _chap_cmd
-            chap_changed=true
-        fi
-    done
-    if [ "$chap_changed" = "true" ]; then
-        targetcli saveconfig
-        echo "=== CHAP credentials applied and configuration saved ==="
+# ─── Phase 2.5: Reapply per-TPG CHAP for generate_node_acls VLANs ────────────
+# The restore brings back CHAP settings from the saved config, but we reapply
+# here to ensure credentials are current after rotation (re-deploy --tags services).
+echo ""
+echo "--- Phase 2.5: Per-TPG CHAP (generate_node_acls VLANs) ---"
+chap_applied=false
+for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
+    if [ "${TPG_GEN_ACLS[$tpg_tag]}" = "true" ] && [[ "${TPG_CHAP_USER[$tpg_tag]+_}" ]]; then
+        echo "  + Setting TPG-level CHAP and authentication=1 for tpg${tpg_tag}"
+        targetcli <<< "/iscsi/${TARGET_IQN}/tpg${tpg_tag} set attribute authentication=1"
+        _chap_cmd="/iscsi/${TARGET_IQN}/tpg${tpg_tag} set auth userid=${TPG_CHAP_USER[$tpg_tag]} password=${TPG_CHAP_PASS[$tpg_tag]}"
+        targetcli <<< "$_chap_cmd"
+        unset _chap_cmd
+        chap_applied=true
     fi
+done
+if [ "$chap_applied" = "false" ]; then
+    echo "  (no per-TPG CHAP configured)"
 fi
+
+# ─── Phase 3: Save updated config to shared storage ───────────────────────────
+echo ""
+echo "--- Phase 3: Save to shared storage ---"
+/root/iscsi-save-client-config.sh
+
+echo ""
+echo "=== iSCSI LUN sync complete ==="

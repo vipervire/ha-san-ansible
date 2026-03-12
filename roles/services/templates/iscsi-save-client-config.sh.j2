@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+# Managed by Ansible — Extract client-facing LIO config to shared ZFS storage
+#
+# Reads saveconfig.json, filters to client-facing entries only (zvol backstores
+# + client target IQN), and writes atomically to shared ZFS storage so the
+# standby node can restore the exact config (LUN numbers, ACLs, CHAP) on failover.
+#
+# Filtering logic (no overlap possible):
+#   Backend backstores:  storage_objects where dev starts with /dev/disk/
+#   Client backstores:   storage_objects where dev starts with /dev/zvol/
+#   Backend targets:     targets where wwn != {{ iscsi_client_iqn }}
+#   Client target:       targets where wwn == {{ iscsi_client_iqn }}
+#
+# Usage: python3 /root/iscsi-save-client-config.sh
+#        (also called as ExecStop by sync-iscsi-luns.service during planned failover)
+
+import json
+import os
+import sys
+
+SAVECONFIG_PATH = "{{ _iscsi_saveconfig_path }}"
+CLIENT_IQN      = "{{ iscsi_client_iqn }}"
+SHARED_DIR      = "/{{ zfs_pool_name }}/cluster-config/iscsi"
+SHARED_CONFIG   = os.path.join(SHARED_DIR, "client-saveconfig.json")
+
+if not os.path.exists(SAVECONFIG_PATH):
+    print(f"ERROR: {SAVECONFIG_PATH} not found — is rtslib-fb-targetctl running?",
+          file=sys.stderr)
+    sys.exit(1)
+
+if not os.path.isdir(SHARED_DIR):
+    print(f"ERROR: {SHARED_DIR} does not exist — is the ZFS pool mounted?",
+          file=sys.stderr)
+    sys.exit(1)
+
+with open(SAVECONFIG_PATH) as f:
+    config = json.load(f)
+
+# Filter: client backstores = zvol devices only
+client_storage = [
+    obj for obj in config.get("storage_objects", [])
+    if obj.get("dev", "").startswith("/dev/zvol/")
+]
+
+# Filter: client target = the one matching CLIENT_IQN
+client_targets = [
+    t for t in config.get("targets", [])
+    if t.get("wwn") == CLIENT_IQN
+]
+
+if not client_storage and not client_targets:
+    # saveconfig.json is in stripped (backend-only) state — this happens right
+    # after an Ansible deploy strip, or during failover when gap-fill didn't run
+    # and targetcli saveconfig wasn't called. Shared config is already current;
+    # overwriting it with empty data would cause the next failover to restore nothing.
+    print(f"NOTE: saveconfig.json has no client entries — skipping save to preserve "
+          f"existing shared config at {SHARED_CONFIG}")
+    sys.exit(0)
+
+client_config = {
+    "fabric_modules": config.get("fabric_modules", []),
+    "storage_objects": client_storage,
+    "targets": client_targets,
+}
+
+# Atomic write: write to .tmp then rename
+tmp_path = SHARED_CONFIG + ".tmp"
+try:
+    with open(tmp_path, "w") as f:
+        json.dump(client_config, f, indent=2)
+    os.rename(tmp_path, SHARED_CONFIG)
+except Exception as e:
+    # Clean up temp file on failure
+    if os.path.exists(tmp_path):
+        os.unlink(tmp_path)
+    print(f"ERROR: Failed to write {SHARED_CONFIG}: {e}", file=sys.stderr)
+    sys.exit(1)
+
+bs_count  = len(client_storage)
+tpg_count = sum(len(t.get("tpgs", [])) for t in client_targets)
+print(f"Saved client config: {bs_count} backstores, "
+      f"{len(client_targets)} target(s), {tpg_count} TPG(s) → {SHARED_CONFIG}")

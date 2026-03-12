@@ -117,7 +117,15 @@ CHAP credentials are never stored in plaintext on disk. Ansible deploys `/root/.
 
 ### iSCSI LUN Auto-Sync
 
-`sync-iscsi-luns` Pacemaker resource auto-maps zvols to LIO LUNs after each pool import. Phase 0 bakes in TPG→dataset mapping at deploy time (no runtime file dependency). To add an initiator ACL without re-running Ansible: edit `/san-pool/cluster-config/iscsi/acls-<vlan-name>.conf`, then run `bash /root/sync-iscsi-luns.sh`.
+`sync-iscsi-luns` Pacemaker resource restores the exact client-facing LIO config (LUN numbers, ACLs, CHAP) from shared ZFS storage after each pool import. LUN numbers are preserved across failovers — no reordering. Phase 0 bakes in TPG→dataset mapping at deploy time (no runtime file dependency).
+
+The client config is split from the node-local `saveconfig.json`:
+- **Node-local `saveconfig.json`**: backend target only (disk backstores for ZFS replication peer)
+- **`/san-pool/cluster-config/iscsi/client-saveconfig.json`**: client-facing target (zvol LUNs, ACLs, CHAP) — authoritative source of truth
+
+A systemd path unit (`iscsi-config-sync.path`) watches `saveconfig.json` for changes and syncs the client portion to shared storage in near-real-time. `ExecStop` on the sync service saves a final copy during planned failover.
+
+To add an initiator ACL without re-running Ansible: `targetcli /iscsi/<iqn>/tpg<N>/acls create <initiator_iqn> && targetcli saveconfig` — the path watcher will persist the change to shared storage automatically.
 
 ### Pacemaker Resource Ordering
 
