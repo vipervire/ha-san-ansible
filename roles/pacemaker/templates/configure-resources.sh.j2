@@ -65,6 +65,7 @@ pcs resource create vip-cockpit ocf:heartbeat:IPaddr2 \
 {% set _has_nfs = client_vlans | selectattr('services', 'contains', 'nfs') | list | length > 0 %}
 {% set _has_smb = client_vlans | selectattr('services', 'contains', 'smb') | list | length > 0 %}
 {% set _has_iscsi = client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0 %}
+{% set _portblock_port_map = {'iscsi': 3260, 'nfs': 2049, 'smb': 445} %}
 echo "Creating service resources (idempotent — skipped if already present)"
 {% if _has_nfs %}
 pcs resource create nfs-server systemd:nfs-kernel-server \
@@ -99,11 +100,43 @@ pcs resource create sync-iscsi-luns systemd:sync-iscsi-luns \
   2>/dev/null || echo "  (sync-iscsi-luns already exists)"
 {% endif %}
 
-# ─── san-services group (flat: VIPs → sync → services) ──────────────────────
-# VIPs start first (in VLAN order), then iSCSI LUN sync, then enabled services.
+# ─── Portblock/portunblock resources ─────────────────────────────────────────
+# Portblocks DROP packets on VIP:port while services are starting, so clients
+# see a timeout instead of RST (connection refused). Portunblock lifts the DROP
+# rules and sends TCP tickles to speed up client reconnection after failover.
+# On Debian 12 / RHEL 9, iptables is iptables-nft — rules go into the kernel
+# nftables backend and coexist cleanly with our inet-filter nftables.conf rules.
+#
+# Stop order (reversed): portunblock stops first (re-blocks via
+# reset_local_on_unblock_stop=true), then services drain, then VIPs are removed,
+# then portblock rules are cleaned up.
+mkdir -p /run/portblock
+echo "Creating portblock/portunblock resources"
+{% for cv in client_vlans %}
+{% for svc in cv.services | select('in', _portblock_port_map) %}
+pcs resource create portblock-{{ cv.name }}-{{ svc }} ocf:heartbeat:portblock \
+  ip="{{ cv.vip }}" portno={{ _portblock_port_map[svc] }} protocol=tcp action=block \
+  op start timeout=20s op stop timeout=20s op monitor interval=0 \
+  2>/dev/null || echo "  (portblock-{{ cv.name }}-{{ svc }} already exists)"
+pcs resource create portunblock-{{ cv.name }}-{{ svc }} ocf:heartbeat:portblock \
+  ip="{{ cv.vip }}" portno={{ _portblock_port_map[svc] }} protocol=tcp action=unblock \
+  tickle_dir=/run/portblock reset_local_on_unblock_stop=true \
+  op start timeout=20s op stop timeout=20s op monitor interval=0 \
+  2>/dev/null || echo "  (portunblock-{{ cv.name }}-{{ svc }} already exists)"
+{% endfor %}
+{% endfor %}
+
+# ─── san-services group (portblocks → VIPs → sync → services → portunblocks) ──
+# Portblocks start first to protect the VIP:port gap, portunblocks start last
+# to lift DROP rules and send TCP tickles once all services are ready.
 # Only services present in at least one client_vlans[].services are included.
 echo "Creating san-services group"
 pcs resource group add san-services \
+{% for cv in client_vlans %}
+{% for svc in cv.services | select('in', _portblock_port_map) %}
+  portblock-{{ cv.name }}-{{ svc }} \
+{% endfor %}
+{% endfor %}
 {% for cv in client_vlans %}
   vip-{{ cv.name }} \
 {% endfor %}
@@ -116,6 +149,11 @@ pcs resource group add san-services \
 {% if _has_smb %}
   smb-server \
 {% endif %}
+{% for cv in client_vlans %}
+{% for svc in cv.services | select('in', _portblock_port_map) %}
+  portunblock-{{ cv.name }}-{{ svc }} \
+{% endfor %}
+{% endfor %}
   2>/dev/null || echo "  (san-services group already exists)"
 
 # Cockpit group stays separate (management VLAN)

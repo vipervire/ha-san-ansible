@@ -122,9 +122,11 @@ CHAP credentials are never stored in plaintext on disk. Ansible deploys `/root/.
 ### Pacemaker Resource Ordering
 
 ```
-zfs-pool → san-services (vip-enduser → vip-hypervisor → sync-iscsi-luns → nfs-server → smb-server)
+zfs-pool → san-services (portblock-<vlan>-<svc>... → vip-<vlan>... → sync-iscsi-luns → nfs-server → smb-server → portunblock-<vlan>-<svc>...)
 zfs-pool → cockpit-group (vip-cockpit → cockpit-service)
 ```
+
+Portblock resources DROP packets on each VIP:port (iSCSI=3260, NFS=2049, SMB=445) while services start, preventing clients from receiving TCP RST during the startup window. Portunblock lifts the DROP rules and sends TCP tickles when all services are ready. Uses `ocf:heartbeat:portblock` (from `resource-agents`, already installed). Requires `iptables-nft` (present on Debian 12 and RHEL 9 by default as a transitive dependency).
 
 ### Config Files on Shared Storage
 
