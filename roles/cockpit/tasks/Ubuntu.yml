@@ -52,5 +52,7 @@
       - cockpit-file-sharing
       - cockpit-identities
       - cockpit-navigator
+      - cockpit-zfs
+      - cockpit-scheduler
     state: present
   ignore_errors: true  # repo may not have packages for every Ubuntu release
