@@ -520,6 +520,11 @@ def cmd_sync(cfg: ManagerConfig, tc: TargetcliRunner, dry_run: bool) -> int:
     # Phase 1: Merge configs and extract current state
     print("\n--- Phase 1: Merge and parse config ---")
 
+    if not os.path.isdir(cfg.shared_dir):
+        print(f"ERROR: {cfg.shared_dir} is not accessible — is the ZFS pool imported?",
+              file=sys.stderr)
+        return 1
+
     if not os.path.exists(cfg.shared_config_path):
         print(f"ERROR: {cfg.shared_config_path} not found.", file=sys.stderr)
         print(f"       Run iscsi-config-manager.py setup first, or redeploy with --tags services.",
@@ -569,7 +574,10 @@ def cmd_sync(cfg: ManagerConfig, tc: TargetcliRunner, dry_run: bool) -> int:
                 try:
                     if not stat.S_ISBLK(os.stat(zvol_path).st_mode):
                         continue
-                except OSError:
+                except FileNotFoundError:
+                    continue
+                except OSError as e:
+                    print(f"WARNING: Cannot stat {zvol_path}: {e}", file=sys.stderr)
                     continue
 
                 bs_name = tpg.backstore_prefix + zvol_name

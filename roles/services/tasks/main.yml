@@ -208,7 +208,10 @@
   ansible.builtin.systemd:
     name: iscsi-config-sync.path
     state: stopped
-  ignore_errors: true
+  register: _stop_path_watcher
+  failed_when: >
+    _stop_path_watcher is failed and
+    'could not be found' not in (_stop_path_watcher.msg | default(''))
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
 # Strip client entries from local saveconfig.json so they don't load at boot.
