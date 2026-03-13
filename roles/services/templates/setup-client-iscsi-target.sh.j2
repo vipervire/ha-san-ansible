@@ -37,15 +37,8 @@ echo "=== Configuring client iSCSI target: ${TARGET_IQN} ==="
 echo "    iSCSI VLANs: {{ iscsi_vlans | map(attribute='name') | join(', ') }} (${TOTAL_TPGS} TPG(s))"
 
 # ─── Decrypt CHAP credentials ─────────────────────────────────────────────
-# CHAP_USER["tpg:iqn"] / CHAP_PASS["tpg:iqn"] — per-initiator (ACL-mode VLANs)
-# TPG_CHAP_USER["tpg"] / TPG_CHAP_PASS["tpg"] — per-TPG (generate_node_acls VLANs)
-declare -A CHAP_USER CHAP_PASS TPG_CHAP_USER TPG_CHAP_PASS
-if [ -f /root/.iscsi-chap.env.enc ]; then
-  eval "$(openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/etc/machine-id \
-    -in /root/.iscsi-chap.env.enc 2>/dev/null)" || {
-    echo "WARNING: Failed to decrypt CHAP credentials — CHAP will not be applied"
-  }
-fi
+# Populates CHAP_USER/CHAP_PASS (per-initiator) and TPG_CHAP_USER/TPG_CHAP_PASS (per-TPG)
+. /root/iscsi-chap-decrypt.sh
 
 # ─── Create target if needed (tpg1 auto-created with target) ──────────────────
 if targetcli ls /iscsi/"${TARGET_IQN}" &>/dev/null; then
@@ -137,9 +130,11 @@ fi
 # Apply per-initiator CHAP credentials from encrypted file
 chap_key="{{ tpg_num }}:{{ initiator_iqn }}"
 if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
-  _chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }}/acls/{{ initiator_iqn }} set auth userid=${CHAP_USER[$chap_key]} password=${CHAP_PASS[$chap_key]}"
+  _cu="${CHAP_USER[$chap_key]}"
+  _cp="${CHAP_PASS[$chap_key]}"
+  _chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }}/acls/{{ initiator_iqn }} set auth userid='${_cu//\'/\'\\\'\'}' password='${_cp//\'/\'\\\'\'}'"
   targetcli <<< "$_chap_cmd"
-  unset _chap_cmd
+  unset _chap_cmd _cu _cp
 fi
 {% endif %}
 {% endfor %}
@@ -186,46 +181,6 @@ for tpg_tag in $(targetcli ls /iscsi/"${TARGET_IQN}"/ 2>/dev/null \
     echo "    Then remove ACLs, portals, and LUNs before deleting the TPG."
   fi
 done
-
-# ─── Write per-VLAN ACL files to shared storage ────────────────────────────────
-# sync-iscsi-luns.sh reads acls-<vlan>.conf after pool import to recreate ACLs
-# on whichever node becomes active. Edit these files directly to add/remove
-# initiators without re-running Ansible.
-ACLS_DIR="/{{ zfs_pool_name }}/cluster-config/iscsi"
-mkdir -p "${ACLS_DIR}"
-{% for cv in iscsi_vlans %}
-{% if not (cv.generate_node_acls | default(false)) %}
-{% set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
-cat > "${ACLS_DIR}/acls-{{ cv.name }}.conf" <<'ACLS_{{ cv.name | upper }}_EOF'
-# Managed by Ansible — iSCSI initiator ACLs for VLAN: {{ cv.name }} (TPG{{ loop.index }})
-# One IQN per line. Edit to add/remove initiators.
-# Changes apply on next failover or: bash /root/sync-iscsi-luns.sh
-{% for entry in vlan_acls %}
-{% set initiator_iqn = entry.iqn if entry is mapping else entry %}
-{{ initiator_iqn }}
-{% endfor %}
-ACLS_{{ cv.name | upper }}_EOF
-chmod 0640 "${ACLS_DIR}/acls-{{ cv.name }}.conf"
-echo "ACL list seeded at ${ACLS_DIR}/acls-{{ cv.name }}.conf"
-{% endif %}
-{% endfor %}
-
-# Write legacy union acls.conf for backward compatibility (all VLANs combined)
-cat > "${ACLS_DIR}/acls.conf" <<'UNION_ACLS_EOF'
-# Managed by Ansible — union ACL list (all iSCSI VLANs combined)
-# Per-VLAN files: acls-<vlan-name>.conf (preferred for per-VLAN sync)
-{% for cv in iscsi_vlans %}
-{% if not (cv.generate_node_acls | default(false)) %}
-{% set vlan_acls = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
-# VLAN: {{ cv.name }} (TPG{{ loop.index }})
-{% for entry in vlan_acls %}
-{% set initiator_iqn = entry.iqn if entry is mapping else entry %}
-{{ initiator_iqn }}
-{% endfor %}
-{% endif %}
-{% endfor %}
-UNION_ACLS_EOF
-chmod 0640 "${ACLS_DIR}/acls.conf"
 
 targetcli saveconfig
 echo ""
