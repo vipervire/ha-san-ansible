@@ -1,0 +1,689 @@
+#!/usr/bin/env python3
+# Managed by Ansible — iSCSI client LIO config manager
+# Usage: iscsi-config-manager.py {setup|sync|save|strip} [--dry-run] [--config PATH]
+#
+# Subcommands:
+#   setup  — Create/reconcile client-facing LIO target (TPGs, portals, ACLs, CHAP)
+#   sync   — Restore client LUNs from shared ZFS storage after pool import (Pacemaker)
+#   save   — Extract client config from saveconfig.json → shared ZFS storage
+#   strip  — Remove client entries from local saveconfig.json (run at deploy time)
+#
+# All deploy-time config (VLANs, TPG mappings, paths) is read from the JSON config
+# file at CONFIG_PATH, rendered by Ansible from iscsi-vlan-config.json.j2.
+# CHAP credentials are never in the config file — they come from the encrypted env file.
+
+CONFIG_PATH = "/root/iscsi-vlan-config.json"
+
+import argparse
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Set, Tuple
+
+
+# ─── Config dataclasses ──────────────────────────────────────────────────────
+
+@dataclass
+class AclEntry:
+    iqn: str
+    has_chap: bool = False
+
+
+@dataclass
+class TpgConfig:
+    number: int
+    vlan: str
+    vip: str
+    dataset: str
+    backstore_prefix: str
+    generate_node_acls: bool
+    has_chap: bool
+    acls: List[AclEntry]
+
+
+@dataclass
+class ManagerConfig:
+    client_iqn: str
+    saveconfig_path: str
+    shared_config_path: str
+    shared_dir: str
+    chap_encrypted_path: str
+    machine_id_path: str
+    pool_name: str
+    tpgs: List[TpgConfig]
+
+    @classmethod
+    def load(cls, path: str) -> "ManagerConfig":
+        with open(path) as f:
+            data = json.load(f)
+        tpgs = []
+        for t in data["tpgs"]:
+            acls = [AclEntry(a["iqn"], a.get("has_chap", False))
+                    for a in t.get("acls", [])]
+            tpgs.append(TpgConfig(
+                number=t["number"],
+                vlan=t["vlan"],
+                vip=t["vip"],
+                dataset=t["dataset"],
+                backstore_prefix=t["backstore_prefix"],
+                generate_node_acls=t["generate_node_acls"],
+                has_chap=t["has_chap"],
+                acls=acls,
+            ))
+        return cls(
+            client_iqn=data["client_iqn"],
+            saveconfig_path=data["saveconfig_path"],
+            shared_config_path=data["shared_config_path"],
+            shared_dir=data["shared_dir"],
+            chap_encrypted_path=data["chap_encrypted_path"],
+            machine_id_path=data["machine_id_path"],
+            pool_name=data["pool_name"],
+            tpgs=tpgs,
+        )
+
+
+# ─── SaveconfigManager (pure functions — testable without targetcli/ZFS) ─────
+
+class SaveconfigManager:
+
+    @staticmethod
+    def load(path: str) -> dict:
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {}
+
+    @staticmethod
+    def save_atomic(path: str, data: dict) -> None:
+        """Write atomically via a unique temp file in the same directory, then rename."""
+        dir_path = os.path.dirname(path) or "."
+        fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f, indent=2)
+            os.chmod(tmp_path, 0o600)
+            os.rename(tmp_path, path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
+
+    @staticmethod
+    def filter_client(config: dict, iqn: str) -> dict:
+        """Extract zvol backstores + client target."""
+        client_storage = [obj for obj in config.get("storage_objects", [])
+                          if obj.get("dev", "").startswith("/dev/zvol/")]
+        client_targets = [t for t in config.get("targets", [])
+                          if t.get("wwn") == iqn]
+        return {
+            "fabric_modules": config.get("fabric_modules", []),
+            "storage_objects": client_storage,
+            "targets": client_targets,
+        }
+
+    @staticmethod
+    def filter_backend(config: dict, iqn: str) -> dict:
+        """Extract disk backstores + non-client targets."""
+        backend_storage = [obj for obj in config.get("storage_objects", [])
+                           if not obj.get("dev", "").startswith("/dev/zvol/")]
+        backend_targets = [t for t in config.get("targets", [])
+                           if t.get("wwn") != iqn]
+        return {
+            "fabric_modules": config.get("fabric_modules", []),
+            "storage_objects": backend_storage,
+            "targets": backend_targets,
+        }
+
+    @staticmethod
+    def merge(local: dict, client: dict, iqn: str) -> dict:
+        """Combine backend entries from local config with client entries from shared config."""
+        backend_storage = [obj for obj in local.get("storage_objects", [])
+                           if not obj.get("dev", "").startswith("/dev/zvol/")]
+        backend_targets = [t for t in local.get("targets", [])
+                           if t.get("wwn") != iqn]
+        return {
+            "fabric_modules": client.get("fabric_modules", local.get("fabric_modules", [])),
+            "storage_objects": backend_storage + client.get("storage_objects", []),
+            "targets": backend_targets + client.get("targets", []),
+        }
+
+    @staticmethod
+    def has_client_entries(config: dict, iqn: str) -> bool:
+        client_storage = [obj for obj in config.get("storage_objects", [])
+                          if obj.get("dev", "").startswith("/dev/zvol/")]
+        client_targets = [t for t in config.get("targets", [])
+                          if t.get("wwn") == iqn]
+        return bool(client_storage or client_targets)
+
+    @staticmethod
+    def extract_state(config: dict, iqn: str) -> Tuple[Set[str], Dict[int, int]]:
+        """Return (set of zvol bs_names, dict of tpg_tag → max_lun_index)."""
+        bs_names: Set[str] = set()
+        tpg_max_lun: Dict[int, int] = {}
+
+        for bs in config.get("storage_objects", []):
+            if bs.get("plugin") == "block" and bs.get("dev", "").startswith("/dev/zvol/"):
+                name = bs.get("name", "")
+                if name:
+                    bs_names.add(name)
+
+        for t in config.get("targets", []):
+            if t.get("wwn") == iqn:
+                for tpg in t.get("tpgs", []):
+                    tpg_tag = tpg.get("tag", 0)
+                    for lun in tpg.get("luns", []):
+                        lun_index = lun.get("index", 0)
+                        if tpg_tag not in tpg_max_lun or lun_index > tpg_max_lun[tpg_tag]:
+                            tpg_max_lun[tpg_tag] = lun_index
+                break
+
+        return bs_names, tpg_max_lun
+
+
+# ─── ChapManager ─────────────────────────────────────────────────────────────
+
+class ChapManager:
+
+    def __init__(self, cfg: ManagerConfig) -> None:
+        self.cfg = cfg
+        self._data: Optional[dict] = None
+
+    def load(self) -> None:
+        """Decrypt and parse JSON credentials. Falls back to empty dicts on failure."""
+        if not os.path.exists(self.cfg.chap_encrypted_path):
+            self._data = {"per_initiator": {}, "per_tpg": {}}
+            return
+        try:
+            result = subprocess.run(
+                ["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2",
+                 "-pass", f"file:{self.cfg.machine_id_path}",
+                 "-in", self.cfg.chap_encrypted_path],
+                capture_output=True, text=True, check=True,
+            )
+            self._data = json.loads(result.stdout)
+        except Exception as e:
+            print(f"WARNING: Failed to decrypt CHAP credentials — CHAP will not be applied: {e}",
+                  file=sys.stderr)
+            self._data = {"per_initiator": {}, "per_tpg": {}}
+
+    def get_initiator_chap(self, tpg_num: int, iqn: str) -> Optional[Tuple[str, str]]:
+        """Return (user, pass) for per-initiator CHAP, or None."""
+        if self._data is None:
+            self.load()
+        entry = self._data.get("per_initiator", {}).get(f"{tpg_num}:{iqn}")
+        if entry:
+            return entry["user"], entry["pass"]
+        return None
+
+    def get_tpg_chap(self, tpg_num: int) -> Optional[Tuple[str, str]]:
+        """Return (user, pass) for per-TPG CHAP, or None."""
+        if self._data is None:
+            self.load()
+        entry = self._data.get("per_tpg", {}).get(str(tpg_num))
+        if entry:
+            return entry["user"], entry["pass"]
+        return None
+
+
+# ─── TargetcliRunner ─────────────────────────────────────────────────────────
+
+class TargetcliRunner:
+
+    def __init__(self, dry_run: bool = False) -> None:
+        self.dry_run = dry_run
+
+    def run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+        if self.dry_run:
+            print(f"[DRY-RUN] targetcli {' '.join(args)}", file=sys.stderr)
+            return subprocess.CompletedProcess(list(args), 0, "", "")
+        result = subprocess.run(["targetcli"] + list(args), capture_output=True, text=True)
+        if check and result.returncode != 0:
+            print(f"targetcli error ({' '.join(args)}): {result.stderr}", file=sys.stderr)
+            raise subprocess.CalledProcessError(
+                result.returncode, ["targetcli"] + list(args),
+                result.stdout, result.stderr)
+        return result
+
+    def run_script(self, script: str) -> subprocess.CompletedProcess:
+        """Send multi-line commands to targetcli via stdin (for special-char handling)."""
+        if self.dry_run:
+            for line in script.strip().splitlines():
+                print(f"[DRY-RUN] targetcli <<< '{line}'", file=sys.stderr)
+            return subprocess.CompletedProcess(["targetcli"], 0, "", "")
+        return subprocess.run(["targetcli"], input=script, capture_output=True, text=True)
+
+    def path_exists(self, path: str) -> bool:
+        # Always query live LIO state even in dry-run mode so that setup only
+        # reports actions that would actually occur (reconciliation, not a full
+        # rebuild on an already-configured system). Only write operations are
+        # suppressed in dry-run mode.
+        result = subprocess.run(["targetcli", "ls", path], capture_output=True, text=True)
+        return result.returncode == 0
+
+    def list_portal_ips(self, iqn: str, tpg_num: int) -> List[str]:
+        if self.dry_run:
+            return []
+        result = subprocess.run(
+            ["targetcli", "ls", f"/iscsi/{iqn}/tpg{tpg_num}/portals/"],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            return []
+        return re.findall(r'(?<=o- )\d+\.\d+\.\d+\.\d+', result.stdout)
+
+    def list_acl_iqns(self, iqn: str, tpg_num: int) -> List[str]:
+        if self.dry_run:
+            return []
+        result = subprocess.run(
+            ["targetcli", "ls", f"/iscsi/{iqn}/tpg{tpg_num}/acls/"],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            return []
+        return re.findall(r'(?<=o- )iqn\.[^\s]+', result.stdout)
+
+    def list_tpg_tags(self, iqn: str) -> List[int]:
+        if self.dry_run:
+            return []
+        result = subprocess.run(
+            ["targetcli", "ls", f"/iscsi/{iqn}/"],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            return []
+        return sorted(int(t) for t in re.findall(r'(?<=o- tpg)\d+', result.stdout))
+
+    def saveconfig(self) -> None:
+        self.run("saveconfig")
+
+    def restoreconfig(self, path: str) -> None:
+        self.run("restoreconfig", path)
+
+
+# ─── CHAP escaping ───────────────────────────────────────────────────────────
+
+def _escape_for_targetcli(s: str) -> str:
+    """Wrap value in single quotes, escaping embedded single quotes as '\\''."""
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+# ─── Subcommands ─────────────────────────────────────────────────────────────
+
+def cmd_setup(cfg: ManagerConfig, tc: TargetcliRunner) -> int:
+    """Create or reconcile the client-facing LIO iSCSI target (equiv: setup-client-iscsi-target.sh)."""
+    chap = ChapManager(cfg)
+    chap.load()
+
+    print(f"=== Configuring client iSCSI target: {cfg.client_iqn} ===")
+    print(f"    iSCSI VLANs: {', '.join(t.vlan for t in cfg.tpgs)} ({len(cfg.tpgs)} TPG(s))")
+
+    # Create target (tpg1 auto-created with target)
+    if tc.path_exists(f"/iscsi/{cfg.client_iqn}"):
+        print(f"Target {cfg.client_iqn} already exists — reconciling TPGs.")
+    else:
+        tc.run("/iscsi", "create", cfg.client_iqn)
+        print(f"  Created target {cfg.client_iqn} (tpg1 auto-created)")
+
+    # Remove default 0.0.0.0 portal from tpg1 (created automatically with target)
+    tc.run(f"/iscsi/{cfg.client_iqn}/tpg1/portals", "delete", "0.0.0.0", "3260", check=False)
+
+    for tpg in cfg.tpgs:
+        print(f"\n--- TPG{tpg.number}: VLAN={tpg.vlan}, VIP={tpg.vip} ---")
+
+        if tpg.number > 1:
+            if not tc.path_exists(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}"):
+                tc.run(f"/iscsi/{cfg.client_iqn}", "create")
+                # Verify the correct tag was assigned. Stale higher-numbered TPGs cause
+                # LIO to assign a different tag than expected.
+                if not tc.dry_run and not tc.path_exists(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}"):
+                    print(f"ERROR: Created a new TPG but tpg{tpg.number} still does not exist.",
+                          file=sys.stderr)
+                    print(f"       A stale higher-numbered TPG likely caused LIO to assign a different tag.",
+                          file=sys.stderr)
+                    print(f"       List current TPGs: targetcli ls /iscsi/{cfg.client_iqn}/",
+                          file=sys.stderr)
+                    print(f"       Remove stale TPGs (clear ACLs, portals, and LUNs first), then re-run.",
+                          file=sys.stderr)
+                    return 1
+                print(f"  Created tpg{tpg.number}")
+                tc.run(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}/portals",
+                       "delete", "0.0.0.0", "3260", check=False)
+
+        # Bind portal — only this VLAN's VIP should be in this TPG
+        portal_path = f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}/portals/{tpg.vip}:3260"
+        if not tc.path_exists(portal_path):
+            tc.run(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}/portals", "create", tpg.vip, "3260")
+            print(f"  + Created portal {tpg.vip}:3260")
+
+        # Remove stale portals (anything that isn't this VLAN's VIP)
+        for portal_ip in tc.list_portal_ips(cfg.client_iqn, tpg.number):
+            if portal_ip != tpg.vip:
+                print(f"  - Removing stale portal {portal_ip}:3260 from tpg{tpg.number}")
+                tc.run(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}/portals",
+                       "delete", portal_ip, "3260")
+
+        # Set TPG attributes
+        if tpg.generate_node_acls:
+            tc.run(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}", "set", "attribute",
+                   "generate_node_acls=1")
+            tc.run(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}", "set", "attribute",
+                   "demo_mode_write_protect=0")
+        else:
+            tc.run(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}", "set", "attribute",
+                   "generate_node_acls=0")
+
+        tc.run(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}", "set", "attribute",
+               f"authentication={'1' if tpg.has_chap else '0'}")
+
+        # Enable the TPG (responds to initiator connections and SendTargets discovery)
+        tc.run(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}", "enable", check=False)
+
+        if not tpg.generate_node_acls:
+            desired_iqns = {acl.iqn for acl in tpg.acls}
+
+            # Add missing ACLs and apply per-initiator CHAP
+            for acl in tpg.acls:
+                acl_path = f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}/acls/{acl.iqn}"
+                if not tc.path_exists(acl_path):
+                    tc.run(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}/acls", "create", acl.iqn)
+                    print(f"  + Added ACL: {acl.iqn}")
+                if acl.has_chap:
+                    creds = chap.get_initiator_chap(tpg.number, acl.iqn)
+                    if creds:
+                        user, passwd = creds
+                        chap_cmd = (f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}/acls/{acl.iqn}"
+                                    f" set auth userid={_escape_for_targetcli(user)}"
+                                    f" password={_escape_for_targetcli(passwd)}")
+                        tc.run_script(chap_cmd)
+
+            # Remove stale ACLs (IQNs not in this VLAN's ACL list)
+            for existing_iqn in tc.list_acl_iqns(cfg.client_iqn, tpg.number):
+                if existing_iqn not in desired_iqns:
+                    print(f"  - Removing stale ACL from tpg{tpg.number}: {existing_iqn}")
+                    tc.run(f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}/acls", "delete", existing_iqn)
+
+        elif tpg.has_chap:
+            # TPG-level CHAP — all initiators share one credential (generate_node_acls mode)
+            creds = chap.get_tpg_chap(tpg.number)
+            if creds:
+                user, passwd = creds
+                chap_cmd = (f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}"
+                            f" set auth userid={_escape_for_targetcli(user)}"
+                            f" password={_escape_for_targetcli(passwd)}")
+                tc.run_script(chap_cmd)
+
+    # Warn about stale TPGs (beyond current VLAN count)
+    # Auto-deletion requires removing all LUNs, portals, and ACLs first — operator
+    # should clean up manually when removing an iSCSI VLAN.
+    print(f"\n--- Checking for stale TPGs (beyond tpg{len(cfg.tpgs)}) ---")
+    for tpg_tag in tc.list_tpg_tags(cfg.client_iqn):
+        if tpg_tag > len(cfg.tpgs):
+            print(f"  WARNING: stale tpg{tpg_tag} found — no longer mapped to a VLAN.")
+            print(f"    Disable: targetcli /iscsi/{cfg.client_iqn}/tpg{tpg_tag} disable")
+            print(f"    Then remove ACLs, portals, and LUNs before deleting the TPG.")
+
+    tc.saveconfig()
+    print("\n=== Client iSCSI target configured successfully ===")
+    return 0
+
+
+def cmd_save(cfg: ManagerConfig, dry_run: bool) -> int:
+    """Save client-facing LIO config to shared ZFS storage (equiv: iscsi-save-client-config.py)."""
+    if not os.path.exists(cfg.saveconfig_path):
+        print(f"ERROR: {cfg.saveconfig_path} not found — is rtslib-fb-targetctl running?",
+              file=sys.stderr)
+        return 1
+
+    if not os.path.isdir(cfg.shared_dir):
+        print(f"ERROR: {cfg.shared_dir} does not exist — is the ZFS pool mounted?",
+              file=sys.stderr)
+        return 1
+
+    config = SaveconfigManager.load(cfg.saveconfig_path)
+
+    if not SaveconfigManager.has_client_entries(config, cfg.client_iqn):
+        # saveconfig.json is in stripped (backend-only) state — this happens right
+        # after an Ansible deploy strip, or during failover when the sync script
+        # didn't run and targetcli saveconfig wasn't called. Shared config is already
+        # current; overwriting it with empty data would cause the next failover to
+        # restore nothing.
+        print(f"NOTE: saveconfig.json has no client entries — skipping save to preserve "
+              f"existing shared config at {cfg.shared_config_path}")
+        return 0
+
+    client_config = SaveconfigManager.filter_client(config, cfg.client_iqn)
+
+    if not dry_run:
+        SaveconfigManager.save_atomic(cfg.shared_config_path, client_config)
+
+    bs_count = len(client_config["storage_objects"])
+    tpg_count = sum(len(t.get("tpgs", [])) for t in client_config["targets"])
+    prefix = "[DRY-RUN] Would save" if dry_run else "Saved"
+    print(f"{prefix} client config: {bs_count} backstores, "
+          f"{len(client_config['targets'])} target(s), {tpg_count} TPG(s)"
+          f" → {cfg.shared_config_path}")
+    return 0
+
+
+def cmd_strip(cfg: ManagerConfig, dry_run: bool) -> int:
+    """Remove client-facing entries from local saveconfig.json (equiv: iscsi-strip-client-config.py)."""
+    if not os.path.exists(cfg.saveconfig_path):
+        print(f"NOTE: {cfg.saveconfig_path} not found — nothing to strip")
+        return 0
+
+    config = SaveconfigManager.load(cfg.saveconfig_path)
+
+    original_bs_count = len(config.get("storage_objects", []))
+    original_target_count = len(config.get("targets", []))
+
+    backend = SaveconfigManager.filter_backend(config, cfg.client_iqn)
+    stripped_bs = original_bs_count - len(backend["storage_objects"])
+    stripped_targets = original_target_count - len(backend["targets"])
+
+    if stripped_bs == 0 and stripped_targets == 0:
+        print("No client entries found in saveconfig.json — nothing to strip")
+        return 0
+
+    if not dry_run:
+        # Modify in place to preserve all original top-level keys (fabric_modules, etc.)
+        config["storage_objects"] = backend["storage_objects"]
+        config["targets"] = backend["targets"]
+        SaveconfigManager.save_atomic(cfg.saveconfig_path, config)
+
+    prefix = "[DRY-RUN] Would strip" if dry_run else "Stripped"
+    print(f"{prefix} {stripped_bs} client backstore(s) and "
+          f"{stripped_targets} client target(s) from local saveconfig.json")
+    print(f"Remaining: {len(backend['storage_objects'])} backend backstore(s), "
+          f"{len(backend['targets'])} backend target(s)")
+    return 0
+
+
+def cmd_sync(cfg: ManagerConfig, tc: TargetcliRunner, dry_run: bool) -> int:
+    """Restore client LUNs from shared ZFS storage (equiv: sync-iscsi-luns.sh).
+
+    Phases:
+      0    — TPG-to-VLAN mapping (loaded from JSON config at deploy time)
+      0.5  — Decrypt CHAP credentials
+      1    — Merge local backend config with shared client config; extract state
+      1.5  — Restore merged config via targetcli
+      2    — Gap-fill: map any zvols not yet in restored config
+      2.5  — Reapply per-TPG CHAP for generate_node_acls VLANs; save if changed
+      3    — Save updated config to shared storage
+    """
+    print(f"=== Syncing iSCSI LUNs for target: {cfg.client_iqn} ===")
+    for tpg in cfg.tpgs:
+        print(f"    TPG{tpg.number}: VLAN={tpg.vlan}, dataset={tpg.dataset}")
+
+    # Phase 0.5: Decrypt CHAP credentials
+    chap = ChapManager(cfg)
+    chap.load()
+
+    # Phase 1: Merge configs and extract current state
+    print("\n--- Phase 1: Merge and parse config ---")
+
+    if not os.path.isdir(cfg.shared_dir):
+        print(f"ERROR: {cfg.shared_dir} is not accessible — is the ZFS pool imported?",
+              file=sys.stderr)
+        return 1
+
+    if not os.path.exists(cfg.shared_config_path):
+        print(f"ERROR: {cfg.shared_config_path} not found.", file=sys.stderr)
+        print(f"       Run iscsi-config-manager.py setup first, or redeploy with --tags services.",
+              file=sys.stderr)
+        return 1
+
+    local_config = SaveconfigManager.load(cfg.saveconfig_path)
+    client_config = SaveconfigManager.load(cfg.shared_config_path)
+    merged = SaveconfigManager.merge(local_config, client_config, cfg.client_iqn)
+
+    backend_bs_count = len([obj for obj in local_config.get("storage_objects", [])
+                             if not obj.get("dev", "").startswith("/dev/zvol/")])
+    client_bs_count = len(client_config.get("storage_objects", []))
+    tpg_count = sum(len(t.get("tpgs", [])) for t in client_config.get("targets", []))
+    print(f"  Merged: {backend_bs_count} backend + {client_bs_count} client backstores, "
+          f"{len(client_config.get('targets', []))} client target(s), {tpg_count} TPG(s)")
+
+    # Write merged config to a temp file for targetcli restoreconfig
+    tf = tempfile.NamedTemporaryFile(mode="w", suffix=".json", prefix="lio-merged-",
+                                     delete=False)
+    merged_path = tf.name
+    try:
+        json.dump(merged, tf, indent=2)
+        tf.close()
+
+        # Phase 1.5: Restore merged config
+        print("  Restoring merged config via targetcli...")
+        tc.restoreconfig(merged_path)
+        print("  Config restored.")
+
+        # Phase 2: Gap-fill — map zvols created since the last save
+        # Covers the sub-second window between a targetcli save and a crash.
+        # New LUNs get explicit numbers = max(existing LUN in TPG) + 1 to prevent reordering.
+        print("\n--- Phase 2: Gap-fill (zvols not in restored config) ---")
+
+        existing_bs, tpg_max_lun = SaveconfigManager.extract_state(merged, cfg.client_iqn)
+        gap_commands: List[str] = []
+        has_gap_fill = False
+
+        for tpg in cfg.tpgs:
+            zvol_dev_base = f"/dev/zvol/{cfg.pool_name}/{tpg.dataset}"
+            if not os.path.isdir(zvol_dev_base):
+                continue
+
+            for zvol_name in sorted(os.listdir(zvol_dev_base)):
+                zvol_path = os.path.join(zvol_dev_base, zvol_name)
+                try:
+                    if not stat.S_ISBLK(os.stat(zvol_path).st_mode):
+                        continue
+                except FileNotFoundError:
+                    continue
+                except OSError as e:
+                    print(f"WARNING: Cannot stat {zvol_path}: {e}", file=sys.stderr)
+                    continue
+
+                bs_name = tpg.backstore_prefix + zvol_name
+                if bs_name in existing_bs:
+                    continue
+
+                has_gap_fill = True
+                next_lun = tpg_max_lun.get(tpg.number, 0) + 1
+                tpg_max_lun[tpg.number] = next_lun
+
+                print(f"  + Gap-fill: backstore {bs_name} → {zvol_path}"
+                      f" (LUN {next_lun} in tpg{tpg.number})")
+                gap_commands.append(f"/backstores/block create {bs_name} {zvol_path}")
+                gap_commands.append(
+                    f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}/luns create"
+                    f" /backstores/block/{bs_name} {next_lun}"
+                )
+
+        if has_gap_fill:
+            gap_commands.append("saveconfig")
+            tc.run_script("\n".join(gap_commands))
+            print("  Gap-fill applied and LIO config saved.")
+        else:
+            print("  No gap-fill needed — restored config is complete.")
+
+        # Phase 2.5: Reapply per-TPG CHAP for generate_node_acls VLANs
+        # Reapplied from freshly-decrypted creds each run so that credential
+        # rotations take effect immediately without needing a saveconfig round-trip.
+        print("\n--- Phase 2.5: Per-TPG CHAP (generate_node_acls VLANs) ---")
+        chap_applied = False
+
+        for tpg in cfg.tpgs:
+            if not tpg.generate_node_acls:
+                continue
+            creds = chap.get_tpg_chap(tpg.number)
+            if creds:
+                user, passwd = creds
+                print(f"  + Setting TPG-level CHAP and authentication=1 for tpg{tpg.number}")
+                tc.run_script(
+                    f"/iscsi/{cfg.client_iqn}/tpg{tpg.number} set attribute authentication=1"
+                )
+                chap_cmd = (f"/iscsi/{cfg.client_iqn}/tpg{tpg.number}"
+                            f" set auth userid={_escape_for_targetcli(user)}"
+                            f" password={_escape_for_targetcli(passwd)}")
+                tc.run_script(chap_cmd)
+                chap_applied = True
+
+        if not chap_applied:
+            print("  (no per-TPG CHAP configured)")
+        else:
+            # Persist CHAP updates so Phase 3 writes current credentials to shared
+            # storage (not the stale values from the restored config).
+            tc.saveconfig()
+            print("  Per-TPG CHAP saved to LIO config.")
+
+        # Phase 3: Save updated config to shared storage
+        print("\n--- Phase 3: Save to shared storage ---")
+        return cmd_save(cfg, dry_run)
+
+    finally:
+        if os.path.exists(merged_path):
+            os.unlink(merged_path)
+
+
+# ─── Entry point ─────────────────────────────────────────────────────────────
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Manage iSCSI client LIO configuration")
+    parser.add_argument("--config", default=CONFIG_PATH,
+                        help=f"Path to VLAN config JSON (default: {CONFIG_PATH})")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Log actions without executing targetcli commands or writing files")
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("setup", help="Create or reconcile the client-facing LIO target")
+    subparsers.add_parser("sync",  help="Restore client LUNs from shared ZFS storage")
+    subparsers.add_parser("save",  help="Save client config to shared ZFS storage")
+    subparsers.add_parser("strip", help="Remove client entries from local saveconfig.json")
+
+    args = parser.parse_args()
+
+    try:
+        cfg = ManagerConfig.load(args.config)
+    except FileNotFoundError:
+        print(f"ERROR: Config file not found: {args.config}", file=sys.stderr)
+        return 1
+    except (KeyError, json.JSONDecodeError) as e:
+        print(f"ERROR: Invalid config file {args.config}: {e}", file=sys.stderr)
+        return 1
+
+    tc = TargetcliRunner(dry_run=args.dry_run)
+
+    if args.command == "setup":
+        return cmd_setup(cfg, tc)
+    elif args.command == "sync":
+        return cmd_sync(cfg, tc, args.dry_run)
+    elif args.command == "save":
+        return cmd_save(cfg, args.dry_run)
+    elif args.command == "strip":
+        return cmd_strip(cfg, args.dry_run)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

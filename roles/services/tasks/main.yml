@@ -129,23 +129,23 @@
   changed_when: true
   no_log: true
 
-- name: Deploy iSCSI CHAP decryption helper
+- name: Deploy iSCSI VLAN config (deploy-time TPG/VLAN mapping, paths — no secrets)
   ansible.builtin.template:
-    src: iscsi-chap-decrypt.sh.j2
-    dest: /root/iscsi-chap-decrypt.sh
-    mode: "0700"
+    src: iscsi-vlan-config.json.j2
+    dest: /root/iscsi-vlan-config.json
+    mode: "0600"
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
-- name: Generate client iSCSI target setup script
+- name: Deploy iSCSI config manager
   ansible.builtin.template:
-    src: setup-client-iscsi-target.sh.j2
-    dest: /root/setup-client-iscsi-target.sh
+    src: iscsi-config-manager.py.j2
+    dest: /root/iscsi-config-manager.py
     mode: "0700"
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
 - name: Run client LIO target setup (always — idempotent, picks up VLAN/TPG changes)
   ansible.builtin.command:
-    cmd: /root/setup-client-iscsi-target.sh
+    cmd: /root/iscsi-config-manager.py setup
   changed_when: true
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
@@ -153,13 +153,6 @@
 # Ensures zvols created by any method (Houston Cockpit, ZFS-over-iSCSI
 # plugin, manual zfs create) are mapped as LUNs on both nodes after
 # failover. Pacemaker runs this between zfs-pool import and vip-iscsi.
-- name: Deploy iSCSI LUN sync script
-  ansible.builtin.template:
-    src: sync-iscsi-luns.sh.j2
-    dest: /root/sync-iscsi-luns.sh
-    mode: "0700"
-  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
-
 - name: Deploy iSCSI LUN sync systemd service
   ansible.builtin.template:
     src: sync-iscsi-luns.service.j2
@@ -173,20 +166,6 @@
     name: sync-iscsi-luns
     enabled: false
     daemon_reload: true
-  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
-
-- name: Deploy iSCSI client config save script
-  ansible.builtin.template:
-    src: iscsi-save-client-config.py.j2
-    dest: /root/iscsi-save-client-config.py
-    mode: "0700"
-  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
-
-- name: Deploy iSCSI client config strip script
-  ansible.builtin.template:
-    src: iscsi-strip-client-config.py.j2
-    dest: /root/iscsi-strip-client-config.py
-    mode: "0700"
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
 - name: Deploy iSCSI config sync path unit
@@ -213,7 +192,7 @@
 # operator knows to re-run after confirming which node is currently active.
 - name: Save current client config to shared ZFS storage (before strip)
   ansible.builtin.command:
-    cmd: /root/iscsi-save-client-config.py
+    cmd: /root/iscsi-config-manager.py save
   when: >
     (client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0) and
     (hostvars[pacemaker_preferred_node]['ansible_mounts']
@@ -229,14 +208,17 @@
   ansible.builtin.systemd:
     name: iscsi-config-sync.path
     state: stopped
-  ignore_errors: true
+  register: _stop_path_watcher
+  failed_when: >
+    _stop_path_watcher is failed and
+    'could not be found' not in (_stop_path_watcher.msg | default(''))
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 
 # Strip client entries from local saveconfig.json so they don't load at boot.
 # The sync script will restore the exact config from shared ZFS after pool import.
 - name: Strip client-facing entries from local saveconfig.json
   ansible.builtin.command:
-    cmd: /root/iscsi-strip-client-config.py
+    cmd: /root/iscsi-config-manager.py strip
   changed_when: true
   when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
 

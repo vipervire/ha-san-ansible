@@ -10,6 +10,6 @@ After={{ _iscsi_target_service }}.service
 
 [Service]
 Type=oneshot
-ExecStart=/root/iscsi-save-client-config.py
+ExecStart=/root/iscsi-config-manager.py save
 StandardOutput=journal
 StandardError=journal

@@ -1,0 +1,49 @@
+{% set iscsi_vlans = client_vlans | selectattr('services', 'contains', 'iscsi') | list %}
+{% set iscsi_vlan_count = iscsi_vlans | length %}
+{# Validate multi-VLAN config at template render time — fail clearly rather than silently wrong #}
+{% if iscsi_vlan_count > 1 %}
+{%   for cv in iscsi_vlans %}
+{%     if not (cv.generate_node_acls | default(false)) %}
+{%       set _acl_check = cv.iscsi_acls | mandatory("client_vlans['" ~ cv.name ~ "'].iscsi_acls is required when multiple VLANs have iSCSI service and generate_node_acls is not true (prevents cross-VLAN access)") %}
+{%     endif %}
+{%     set _ds_check  = cv.iscsi_dataset | mandatory("client_vlans['" ~ cv.name ~ "'].iscsi_dataset is required when multiple VLANs have iSCSI service (prevents LUN namespace collisions)") %}
+{%   endfor %}
+{% endif %}
+{% set tpg_list = [] %}
+{% for cv in iscsi_vlans %}
+{%   set tpg_num = loop.index %}
+{%   set vlan_generate_node_acls = cv.generate_node_acls | default(false) %}
+{%   if not vlan_generate_node_acls %}
+{%     set vlan_acls_raw = cv.iscsi_acls if cv.iscsi_acls is defined else iscsi_client_acls %}
+{%     set vlan_has_chap = vlan_acls_raw | select('mapping') | selectattr('chap_password', 'defined') | list | length > 0 %}
+{%     set acl_list = [] %}
+{%     for entry in vlan_acls_raw %}
+{%       set iqn = entry.iqn if entry is mapping else entry %}
+{%       set entry_has_chap = (entry is mapping) and (entry.chap_password is defined) %}
+{%       set _ = acl_list.append({"iqn": iqn, "has_chap": entry_has_chap}) %}
+{%     endfor %}
+{%   else %}
+{%     set vlan_has_chap = cv.iscsi_chap_password is defined %}
+{%     set acl_list = [] %}
+{%   endif %}
+{%   set _ = tpg_list.append({
+       "number": tpg_num,
+       "vlan": cv.name,
+       "vip": cv.vip,
+       "dataset": cv.iscsi_dataset | default(iscsi_client_zvol_dataset),
+       "backstore_prefix": (cv.name + '-') if iscsi_vlan_count > 1 else '',
+       "generate_node_acls": vlan_generate_node_acls,
+       "has_chap": vlan_has_chap,
+       "acls": acl_list
+     }) %}
+{% endfor %}
+{{ {
+  "client_iqn": iscsi_client_iqn,
+  "saveconfig_path": _iscsi_saveconfig_path,
+  "shared_config_path": "/" + zfs_pool_name + "/cluster-config/iscsi/client-saveconfig.json",
+  "shared_dir": "/" + zfs_pool_name + "/cluster-config/iscsi",
+  "chap_encrypted_path": "/root/.iscsi-chap.env.enc",
+  "machine_id_path": "/etc/machine-id",
+  "pool_name": zfs_pool_name,
+  "tpgs": tpg_list
+} | to_json(indent=2) }}
