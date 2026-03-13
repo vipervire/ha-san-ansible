@@ -137,9 +137,12 @@ fi
 # Apply per-initiator CHAP credentials from encrypted file
 chap_key="{{ tpg_num }}:{{ initiator_iqn }}"
 if [[ "${CHAP_USER[$chap_key]+_}" ]]; then
-  _chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }}/acls/{{ initiator_iqn }} set auth userid=${CHAP_USER[$chap_key]} password=${CHAP_PASS[$chap_key]}"
+  # Wrap in single quotes; escape embedded single quotes as '\''.
+  _cu="${CHAP_USER[$chap_key]}"
+  _cp="${CHAP_PASS[$chap_key]}"
+  _chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }}/acls/{{ initiator_iqn }} set auth userid='${_cu//\'/\'\\\'\'}' password='${_cp//\'/\'\\\'\'}'"
   targetcli <<< "$_chap_cmd"
-  unset _chap_cmd
+  unset _chap_cmd _cu _cp
 fi
 {% endif %}
 {% endfor %}
@@ -166,9 +169,12 @@ done < <(targetcli ls /iscsi/"${TARGET_IQN}"/tpg{{ tpg_num }}/acls/ 2>/dev/null 
 {% elif vlan_has_chap %}
 # TPG-level CHAP — all initiators use the same credential (generate_node_acls mode)
 if [[ "${TPG_CHAP_USER[{{ tpg_num }}]+_}" ]]; then
-  _chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }} set auth userid=${TPG_CHAP_USER[{{ tpg_num }}]} password=${TPG_CHAP_PASS[{{ tpg_num }}]}"
+  # Wrap in single quotes; escape embedded single quotes as '\''.
+  _cu="${TPG_CHAP_USER[{{ tpg_num }}]}"
+  _cp="${TPG_CHAP_PASS[{{ tpg_num }}]}"
+  _chap_cmd="/iscsi/${TARGET_IQN}/tpg{{ tpg_num }} set auth userid='${_cu//\'/\'\\\'\'}' password='${_cp//\'/\'\\\'\'}'"
   targetcli <<< "$_chap_cmd"
-  unset _chap_cmd
+  unset _chap_cmd _cu _cp
 fi
 {% endif %}
 {% endfor %}
