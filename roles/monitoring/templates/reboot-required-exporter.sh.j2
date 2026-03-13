@@ -17,8 +17,7 @@ fi
 {% elif ansible_os_family == 'RedHat' %}
 # Rocky/RHEL: use needs-restarting to check if a reboot is needed
 if command -v needs-restarting &>/dev/null; then
-    needs-restarting -r &>/dev/null
-    if [ $? -eq 1 ]; then
+    if ! needs-restarting -r &>/dev/null; then
         reboot_needed=1
     fi
 fi

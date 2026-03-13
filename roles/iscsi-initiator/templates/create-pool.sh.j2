@@ -45,7 +45,7 @@ echo "=== Attempting auto-discovery of iSCSI device paths by LUN number ==="
 REMOTE_DISKS=()
 discovery_ok=true
 
-if ! iscsiadm -m session &>/dev/null 2>&1; then
+if ! iscsiadm -m session &>/dev/null; then
   echo "WARNING: No active iSCSI sessions. Cannot auto-discover remote paths."
   discovery_ok=false
 fi

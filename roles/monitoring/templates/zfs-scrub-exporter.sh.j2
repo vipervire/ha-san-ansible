@@ -11,6 +11,7 @@ TEXTFILE_TMP="${TEXTFILE}.$$"
 
 # Ensure textfile directory exists
 mkdir -p "${TEXTFILE_DIR}"
+trap 'rm -f "${TEXTFILE_TMP}"' EXIT
 
 # Start building metrics
 {
@@ -139,7 +140,7 @@ mkdir -p "${TEXTFILE_DIR}"
 
         # ─── Per-vdev error counts ──────────────────────────────────────
         while IFS= read -r vdev_line; do
-            if echo "${vdev_line}" | grep -qE "^\s+(/dev/disk/by-id/|/dev/sd|/dev/nvme)[^ ]+\s+"; then
+            if echo "${vdev_line}" | grep -qE "^\s+(/dev/disk/by-id/|/dev/disk/by-path/|/dev/sd|/dev/nvme)[^ ]+\s+"; then
                 VDEV=$(echo "${vdev_line}" | awk '{print $1}' | xargs basename)
                 READ_ERR=$(echo "${vdev_line}" | awk '{print $3}')
                 WRITE_ERR=$(echo "${vdev_line}" | awk '{print $4}')

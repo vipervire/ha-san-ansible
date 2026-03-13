@@ -19,23 +19,26 @@ fi
 
 log "Pool '${POOL_NAME}' is imported. Proceeding with pre-scrub checks..."
 
+# Capture pool status once and reuse for all checks below
+POOL_STATUS=$(zpool status "${POOL_NAME}" 2>/dev/null || true)
+
 # Check if pool is in a healthy state
 if zpool status -x "${POOL_NAME}" | grep -qv "pool '${POOL_NAME}' is healthy"; then
     log "WARNING: Pool '${POOL_NAME}' is not healthy. Checking status..."
 
     # Check for specific conditions that should block scrub
-    if zpool status "${POOL_NAME}" | grep -q "resilver in progress"; then
+    if echo "${POOL_STATUS}" | grep -q "resilver in progress"; then
         log "ERROR: Resilver in progress. Skipping scrub to avoid performance impact."
         exit 0
     fi
 
-    if zpool status "${POOL_NAME}" | grep -q "scrub in progress"; then
+    if echo "${POOL_STATUS}" | grep -q "scrub in progress"; then
         log "INFO: Scrub already in progress. Nothing to do."
         exit 0
     fi
 
 {% if zfs_scrub_skip_on_degraded | default(true) %}
-    if zpool status "${POOL_NAME}" | grep -qE "(DEGRADED|FAULTED|UNAVAIL)"; then
+    if echo "${POOL_STATUS}" | grep -qE "(DEGRADED|FAULTED|UNAVAIL)"; then
         log "ERROR: Pool is degraded/faulted. Skipping scrub. Manual intervention required."
         exit 1
     fi
@@ -45,7 +48,7 @@ if zpool status -x "${POOL_NAME}" | grep -qv "pool '${POOL_NAME}' is healthy"; t
 fi
 
 # Check if a scrub was recently completed
-LAST_SCRUB=$(zpool status "${POOL_NAME}" | grep "scan:" | grep -oE "[0-9]{4}-[0-9]{2}-[0-9]{2}" | tail -1 || echo "never")
+LAST_SCRUB=$(echo "${POOL_STATUS}" | grep "scan:" | grep -oE "[0-9]{4}-[0-9]{2}-[0-9]{2}" | tail -1 || echo "never")
 if [ "${LAST_SCRUB}" != "never" ]; then
     LAST_SCRUB_EPOCH=$(date -d "${LAST_SCRUB}" +%s)
     NOW_EPOCH=$(date +%s)
