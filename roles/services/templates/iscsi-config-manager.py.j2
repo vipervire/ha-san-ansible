@@ -101,11 +101,13 @@ class SaveconfigManager:
 
     @staticmethod
     def save_atomic(path: str, data: dict) -> None:
-        """Write atomically via a temp file in the same directory, then rename."""
-        tmp_path = path + ".tmp"
+        """Write atomically via a unique temp file in the same directory, then rename."""
+        dir_path = os.path.dirname(path) or "."
+        fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
         try:
-            with open(tmp_path, "w") as f:
+            with os.fdopen(fd, "w") as f:
                 json.dump(data, f, indent=2)
+            os.chmod(tmp_path, 0o600)
             os.rename(tmp_path, path)
         except Exception:
             if os.path.exists(tmp_path):
@@ -257,8 +259,10 @@ class TargetcliRunner:
         return subprocess.run(["targetcli"], input=script, capture_output=True, text=True)
 
     def path_exists(self, path: str) -> bool:
-        if self.dry_run:
-            return False
+        # Always query live LIO state even in dry-run mode so that setup only
+        # reports actions that would actually occur (reconciliation, not a full
+        # rebuild on an already-configured system). Only write operations are
+        # suppressed in dry-run mode.
         result = subprocess.run(["targetcli", "ls", path], capture_output=True, text=True)
         return result.returncode == 0
 
