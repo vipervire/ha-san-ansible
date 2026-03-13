@@ -209,7 +209,8 @@
     cmd: /root/iscsi-save-client-config.py
   when: >
     (client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0) and
-    (ansible_mounts | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0)
+    (hostvars[pacemaker_preferred_node]['ansible_mounts']
+      | selectattr('mount', 'equalto', '/' + zfs_pool_name) | list | length > 0)
   changed_when: true
   run_once: true
   delegate_to: "{{ pacemaker_preferred_node }}"
