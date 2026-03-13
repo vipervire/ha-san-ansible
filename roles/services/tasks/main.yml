@@ -129,6 +129,13 @@
   changed_when: true
   no_log: true
 
+- name: Deploy iSCSI CHAP decryption helper
+  ansible.builtin.template:
+    src: iscsi-chap-decrypt.sh.j2
+    dest: /root/iscsi-chap-decrypt.sh
+    mode: "0700"
+  when: client_vlans | selectattr('services', 'contains', 'iscsi') | list | length > 0
+
 - name: Generate client iSCSI target setup script
   ansible.builtin.template:
     src: setup-client-iscsi-target.sh.j2

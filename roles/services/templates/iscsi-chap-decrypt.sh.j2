@@ -1,0 +1,14 @@
+#!/bin/bash
+# Managed by Ansible — Decrypt iSCSI CHAP credentials from encrypted env file
+# Source this script (do not execute directly): . /root/iscsi-chap-decrypt.sh
+#
+# Populates four associative arrays in the calling script's scope:
+#   CHAP_USER["tpg:iqn"]    / CHAP_PASS["tpg:iqn"]    — per-initiator (ACL-mode VLANs)
+#   TPG_CHAP_USER["tpg"]    / TPG_CHAP_PASS["tpg"]    — per-TPG (generate_node_acls VLANs)
+declare -A CHAP_USER CHAP_PASS TPG_CHAP_USER TPG_CHAP_PASS
+if [ -f /root/.iscsi-chap.env.enc ]; then
+  eval "$(openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/etc/machine-id \
+    -in /root/.iscsi-chap.env.enc 2>/dev/null)" || {
+    echo "WARNING: Failed to decrypt CHAP credentials — CHAP will not be applied"
+  }
+fi

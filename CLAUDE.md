@@ -16,6 +16,7 @@ Ansible playbook for HA ZFS-over-iSCSI SAN (Debian 12, Ubuntu 22.04/24.04, Rocky
 | Firewall template | `roles/hardening/templates/nftables.conf.j2` |
 | STONITH script template | `roles/pacemaker/templates/configure-stonith.sh.j2` |
 | iSCSI LUN sync script (Pacemaker resource) | `roles/services/templates/sync-iscsi-luns.sh.j2` |
+| iSCSI CHAP credential decrypt helper (sourced by setup + sync scripts) | `roles/services/templates/iscsi-chap-decrypt.sh.j2` |
 | iSCSI client config save script (ExecStop, path watcher) | `roles/services/templates/iscsi-save-client-config.py.j2` |
 | iSCSI client config strip script (run each deploy) | `roles/services/templates/iscsi-strip-client-config.py.j2` |
 | iSCSI config sync path/service units | `roles/services/templates/iscsi-config-sync.{path,service}.j2` |
@@ -112,7 +113,7 @@ Each iSCSI-enabled client VLAN gets its own LIO TPG. Per-VLAN fields in `client_
 
 ### iSCSI CHAP Encrypted Credentials
 
-CHAP credentials are never stored in plaintext on disk. Ansible deploys `/root/.iscsi-chap.env.enc` (mode 0600, encrypted with OpenSSL AES-256-CBC using `/etc/machine-id` as passphrase). Both `setup-client-iscsi-target.sh` and `sync-iscsi-luns.sh` decrypt at runtime via `eval "$(openssl enc -d ...)"`.
+CHAP credentials are never stored in plaintext on disk. Ansible deploys `/root/.iscsi-chap.env.enc` (mode 0600, encrypted with OpenSSL AES-256-CBC using `/etc/machine-id` as passphrase). Both `setup-client-iscsi-target.sh` and `sync-iscsi-luns.sh` source `/root/iscsi-chap-decrypt.sh` at runtime, which runs `eval "$(openssl enc -d ...)"` and populates four associative arrays in the caller's scope: `CHAP_USER`/`CHAP_PASS` (keyed `"tpg:iqn"`, per-initiator ACL-mode VLANs) and `TPG_CHAP_USER`/`TPG_CHAP_PASS` (keyed by TPG number, `generate_node_acls` VLANs).
 
 - **Machine-specific**: the encrypted file is useless on any other node
 - **Password rotation**: re-run `ansible-playbook ... --tags services` → new encrypted file deployed → re-run setup script

@@ -9,8 +9,11 @@
 # Phases:
 #   0    — TPG-to-VLAN mapping (baked in at Ansible deploy time)
 #   0.5  — Decrypt CHAP credentials
-#   1    — Restore from shared client-saveconfig.json (merge with local backend)
+#   1    — Merge local backend config with shared client config; extract current
+#           backstore/LUN state for gap-fill (single Python pass)
+#   1.5  — Restore merged config via targetcli
 #   2    — Gap-fill: map any zvols not yet in restored config (crash window safety)
+#   2.5  — Reapply per-TPG CHAP for generate_node_acls VLANs; save if changed
 #   3    — Save updated config to shared storage
 #
 # Usage: bash /root/sync-iscsi-luns.sh
@@ -20,7 +23,6 @@ set -euo pipefail
 
 TARGET_IQN="{{ iscsi_client_iqn }}"
 SHARED_CLIENT_CONFIG="/{{ zfs_pool_name }}/cluster-config/iscsi/client-saveconfig.json"
-TOTAL_TPGS={{ iscsi_vlan_count }}
 
 # ─── Phase 0: TPG-to-VLAN mapping (baked in at Ansible deploy time) ───────────
 declare -A TPG_DATASET TPG_VLAN TPG_BS_PREFIX TPG_GEN_ACLS
@@ -32,24 +34,21 @@ TPG_GEN_ACLS[{{ loop.index }}]="{{ 'true' if (cv.generate_node_acls | default(fa
 {% endfor %}
 
 # ─── Phase 0.5: Decrypt CHAP credentials ──────────────────────────────────────
-# CHAP_USER["tpg:iqn"] / CHAP_PASS["tpg:iqn"] — per-initiator (ACL-mode VLANs)
-# TPG_CHAP_USER["tpg"] / TPG_CHAP_PASS["tpg"] — per-TPG (generate_node_acls VLANs)
-declare -A CHAP_USER CHAP_PASS TPG_CHAP_USER TPG_CHAP_PASS
-if [ -f /root/.iscsi-chap.env.enc ]; then
-  eval "$(openssl enc -d -aes-256-cbc -pbkdf2 -pass file:/etc/machine-id \
-    -in /root/.iscsi-chap.env.enc 2>/dev/null)" || {
-    echo "WARNING: Failed to decrypt CHAP credentials — CHAP will not be applied"
-  }
-fi
+# Populates CHAP_USER/CHAP_PASS (per-initiator) and TPG_CHAP_USER/TPG_CHAP_PASS (per-TPG)
+. /root/iscsi-chap-decrypt.sh
 
 echo "=== Syncing iSCSI LUNs for target: ${TARGET_IQN} ==="
 {% for cv in iscsi_vlans %}
 echo "    TPG{{ loop.index }}: VLAN={{ cv.name }}, dataset={{ cv.iscsi_dataset | default(iscsi_client_zvol_dataset) }}"
 {% endfor %}
 
-# ─── Phase 1: Restore from shared storage ─────────────────────────────────────
+# ─── Phase 1: Merge configs and extract current state (single Python pass) ────
+# Merges local backend config (disk backstores + non-client targets) with the
+# shared client config (zvol backstores + client target), writes the result to
+# MERGED_CONFIG, and emits BS|name| / LUN|tpg|index| records to PARSED_STATE
+# for gap-fill — all in one pass to avoid re-reading the merged file.
 echo ""
-echo "--- Phase 1: Restore from shared client config ---"
+echo "--- Phase 1: Merge and parse config ---"
 
 if [ ! -f "${SHARED_CLIENT_CONFIG}" ]; then
     echo "ERROR: ${SHARED_CLIENT_CONFIG} not found."
@@ -57,15 +56,12 @@ if [ ! -f "${SHARED_CLIENT_CONFIG}" ]; then
     exit 1
 fi
 
-# Merge: local backend config (disk backstores + non-client targets) with
-# client config (zvol backstores + client target). Written to a temp file for
-# targetcli restoreconfig. This is safe: during failover the peer is either
-# fenced or has stopped the pool — no active backend sessions exist.
 MERGED_CONFIG=$(mktemp /tmp/lio-merged-XXXXXX.json)
-trap 'rm -f "${MERGED_CONFIG}"' EXIT
+PARSED_STATE=$(mktemp /tmp/lio-parsed-XXXXXX.txt)
+trap 'rm -f "${MERGED_CONFIG}" "${PARSED_STATE}"' EXIT
 
-python3 - << PYEOF
-import json
+python3 - > "${PARSED_STATE}" << PYEOF
+import json, sys
 
 LOCAL_CONFIG  = "{{ _iscsi_saveconfig_path }}"
 CLIENT_CONFIG = "${SHARED_CLIENT_CONFIG}"
@@ -112,9 +108,26 @@ with open(OUTPUT, "w") as f:
 bs_count  = len(client_storage)
 tpg_count = sum(len(t.get("tpgs", [])) for t in client_targets)
 print(f"  Merged: {len(backend_storage)} backend + {bs_count} client backstores, "
-      f"{len(client_targets)} client target(s), {tpg_count} TPG(s)")
+      f"{len(client_targets)} client target(s), {tpg_count} TPG(s)", file=sys.stderr)
+
+# Emit BS and LUN records for gap-fill phase (stdout → PARSED_STATE)
+for bs in merged.get("storage_objects", []):
+    if bs.get("plugin") == "block" and bs.get("dev", "").startswith("/dev/zvol/"):
+        name = bs.get("name", "")
+        if name:
+            print(f"BS|{name}|")
+
+for t in merged.get("targets", []):
+    if t.get("wwn") == CLIENT_IQN:
+        for tpg in t.get("tpgs", []):
+            tpg_tag = tpg.get("tag", 0)
+            for lun in tpg.get("luns", []):
+                lun_index = lun.get("index", 0)
+                print(f"LUN|{tpg_tag}|{lun_index}")
+        break
 PYEOF
 
+# ─── Phase 1.5: Restore merged config ─────────────────────────────────────────
 echo "  Restoring merged config via targetcli..."
 targetcli restoreconfig "${MERGED_CONFIG}"
 echo "  Config restored."
@@ -142,39 +155,9 @@ while IFS='|' read -r _type _key _val; do
             fi
             ;;
     esac
-done < <(ISCSI_TARGET="${TARGET_IQN}" MERGED_CFG="${MERGED_CONFIG}" python3 - << 'PYEOF'
-import json, sys, os
+done < "${PARSED_STATE}"
 
-# Read from the MERGED config that was just restored — NOT from saveconfig.json,
-# which is stripped (backend-only) and would cause all client backstores to appear
-# missing, leading to duplicate LUN mappings.
-merged_cfg = os.environ.get("MERGED_CFG", "")
-target_iqn = os.environ.get("ISCSI_TARGET", "")
-
-if not merged_cfg or not os.path.exists(merged_cfg):
-    sys.exit(0)
-
-with open(merged_cfg) as f:
-    config = json.load(f)
-
-for bs in config.get("storage_objects", []):
-    if bs.get("plugin") == "block" and bs.get("dev", "").startswith("/dev/zvol/"):
-        name = bs.get("name", "")
-        if name:
-            print(f"BS|{name}|")
-
-for t in config.get("targets", []):
-    if t.get("wwn") == target_iqn:
-        for tpg in t.get("tpgs", []):
-            tpg_tag = tpg.get("tag", 0)
-            for lun in tpg.get("luns", []):
-                lun_index = lun.get("index", 0)
-                print(f"LUN|{tpg_tag}|{lun_index}")
-        break
-PYEOF
-)
-
-for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
+for tpg_tag in $(seq 1 "${#TPG_DATASET[@]}"); do
     vlan_name="${TPG_VLAN[$tpg_tag]}"
     dataset="${TPG_DATASET[$tpg_tag]}"
     bs_prefix="${TPG_BS_PREFIX[$tpg_tag]}"
@@ -214,12 +197,15 @@ else
 fi
 
 # ─── Phase 2.5: Reapply per-TPG CHAP for generate_node_acls VLANs ────────────
-# The restore brings back CHAP settings from the saved config, but we reapply
-# here to ensure credentials are current after rotation (re-deploy --tags services).
+# Reapplied from the freshly-decrypted env file each run so that credential
+# rotations take effect immediately without needing a saveconfig → shared storage
+# round-trip. A saveconfig is called when CHAP is applied so that Phase 3 writes
+# the current credentials (not stale ones from the restored config) to shared
+# storage.
 echo ""
 echo "--- Phase 2.5: Per-TPG CHAP (generate_node_acls VLANs) ---"
 chap_applied=false
-for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
+for tpg_tag in $(seq 1 "${#TPG_DATASET[@]}"); do
     if [ "${TPG_GEN_ACLS[$tpg_tag]}" = "true" ] && [[ "${TPG_CHAP_USER[$tpg_tag]+_}" ]]; then
         echo "  + Setting TPG-level CHAP and authentication=1 for tpg${tpg_tag}"
         targetcli <<< "/iscsi/${TARGET_IQN}/tpg${tpg_tag} set attribute authentication=1"
@@ -236,6 +222,11 @@ for tpg_tag in $(seq 1 "$TOTAL_TPGS"); do
 done
 if [ "$chap_applied" = "false" ]; then
     echo "  (no per-TPG CHAP configured)"
+else
+    # Persist CHAP updates to saveconfig.json so Phase 3 writes current
+    # credentials to shared storage (not the stale values from the restored config).
+    targetcli saveconfig
+    echo "  Per-TPG CHAP saved to LIO config."
 fi
 
 # ─── Phase 3: Save updated config to shared storage ───────────────────────────
